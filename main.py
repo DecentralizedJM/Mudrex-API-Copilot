@@ -5,9 +5,16 @@ Copyright (c) 2025 DecentralizedJM (https://github.com/DecentralizedJM)
 Licensed under MIT License - See LICENSE file for details.
 Original work - Attribution required for any derivative works.
 """
+import asyncio
 import logging
 import sys
+import os
 from pathlib import Path
+from telegram import Update
+
+# Change to script directory to ensure relative paths work
+script_dir = Path(__file__).parent.absolute()
+os.chdir(script_dir)
 
 from src.config import config
 from src.rag import RAGPipeline
@@ -43,8 +50,8 @@ def validate_config():
         sys.exit(1)
 
 
-def main():
-    """Main application entry point"""
+async def async_main():
+    """Async main application entry point"""
     logger.info("=" * 50)
     logger.info("Starting Mudrex API Documentation Bot")
     logger.info("=" * 50)
@@ -71,14 +78,36 @@ def main():
     
     try:
         logger.info("Bot is ready! Starting polling...")
-        bot.run()
+        # Start polling with proper async/await
+        await bot.app.initialize()
+        await bot.app.start()
+        await bot.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        
+        # Keep running
+        logger.info("Bot is now running. Press Ctrl+C to stop.")
+        await asyncio.Event().wait()
+        
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+        raise
     finally:
         logger.info("Shutting down...")
+        await bot.app.updater.stop()
+        await bot.app.stop()
+        await bot.app.shutdown()
+
+
+def main():
+    """Main entry point"""
+    try:
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        logger.info("Shutdown complete")
+    except Exception as e:
+        logger.error(f"Application error: {e}", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

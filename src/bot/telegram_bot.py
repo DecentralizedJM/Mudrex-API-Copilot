@@ -59,66 +59,59 @@ class MudrexBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
         welcome_message = """
-👋 Welcome to Mudrex API Documentation Bot!
+Hey! 👋 I'm here to help you with Mudrex API integration.
 
-I'm here to help you with Mudrex API questions.
+*What I can help with:*
+• API authentication & headers
+• Endpoint usage and parameters
+• Request/response formats
+• Error troubleshooting
+• Code examples
 
-🔹 Ask me about:
-- API endpoints and usage
-- Authentication & authorization
-- Request/response formats
-- Error codes and troubleshooting
-- Integration examples
+Just ask me anything about the Mudrex API - I'll keep it simple and practical.
 
-🔸 I can help with:
-- "How do I authenticate with the API?"
-- "What's the endpoint for creating orders?"
-- "How to handle rate limits?"
-- "Error: 401 Unauthorized - what does it mean?"
-
-📚 Type your question and I'll search our documentation!
-
-Use /help to see all available commands.
+Need help? Just mention me with @Mudrex_API_bot or reply to this message!
 """
-        await update.message.reply_text(welcome_message)
+        await update.message.reply_text(welcome_message, parse_mode='Markdown')
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
         help_message = """
-🤖 Mudrex API Bot - Commands
+*Available Commands:*
 
-/start - Show welcome message
-/help - Show this help message
-/stats - Show bot statistics
+/start - Welcome message
+/help - This help message
+/stats - Bot statistics
 
-💡 Tips:
-- Ask clear, specific questions about the API
-- Include error codes when troubleshooting
-- Mention specific endpoints you're working with
-- I only respond to API-related questions
+*How to use me:*
+• Just ask your API question directly
+• Mention me with @ in groups
+• I'll silently ignore non-API messages
 
-Example questions:
-• "How do I get my account balance using the API?"
-• "What headers are required for authentication?"
-• "Explain the /v1/orders endpoint"
-• "What does error 403 mean?"
+*Example questions:*
+• "How do I authenticate?"
+• "What headers does the Futures API need?"
+• "Show me how to create an order"
+• "Rate limit handling?"
+
+Keep it simple - I'm here to help! 🚀
 """
-        await update.message.reply_text(help_message)
+        await update.message.reply_text(help_message, parse_mode='Markdown')
     
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /stats command"""
         stats = self.rag_pipeline.get_stats()
         
         stats_message = f"""
-📊 Bot Statistics
+*Bot Stats* 📊
 
-📚 Documents indexed: {stats['total_documents']}
-🤖 AI Model: {stats['model']}
-✅ Status: Online
+Documents loaded: {stats['total_documents']}
+AI Model: {stats['model']}
+Status: ✓ Online
 
-The bot has access to the complete Mudrex API documentation.
+Ready to help with your API questions!
 """
-        await update.message.reply_text(stats_message)
+        await update.message.reply_text(stats_message, parse_mode='Markdown')
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming text messages"""
@@ -134,7 +127,33 @@ The bot has access to the complete Mudrex API documentation.
         user_message = update.message.text
         user_name = update.effective_user.first_name
         
-        logger.info(f"Message from {user_name}: {user_message[:50]}")
+        # Check if bot is mentioned (@username or reply)
+        bot_mentioned = False
+        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
+            bot_mentioned = True
+        elif update.message.entities:
+            for entity in update.message.entities:
+                if entity.type == "mention" or entity.type == "text_mention":
+                    bot_mentioned = True
+                    break
+        
+        logger.info(f"Message from {user_name}: {user_message[:50]}, mentioned={bot_mentioned}")
+        
+        # Check if message is API-related (only if not mentioned)
+        if not bot_mentioned:
+            is_api_related = self.rag_pipeline.gemini_client.is_api_related_query(user_message)
+            if not is_api_related:
+                logger.info(f"Silently ignoring non-API message: {user_message[:50]}")
+                return  # Silently ignore non-API messages
+        
+        # If mentioned but unclear, ask for clarification
+        if bot_mentioned:
+            # Quick check if it's too vague
+            if len(user_message.split()) < 3 or user_message.strip() in ['hi', 'hello', 'hey', 'sup', 'yo']:
+                await update.message.reply_text(
+                    "Hey! What do you need help with regarding the Mudrex API? 🤔"
+                )
+                return
         
         # Show typing indicator
         await update.message.chat.send_action("typing")
@@ -156,24 +175,29 @@ The bot has access to the complete Mudrex API documentation.
             # Keep only last 6 messages (3 exchanges)
             context.user_data['history'] = chat_history[-6:]
             
-            # Send response
+            # Send response (NO sources - we're confident!)
             response = result['answer']
             
-            # Add sources if available
-            if result.get('sources'):
-                sources_text = "\n\n📖 Sources: " + ", ".join(
-                    [s['filename'] for s in result['sources'][:2]]
+            # Try to send with Markdown, fallback to plain text if it fails
+            try:
+                await update.message.reply_text(
+                    response,
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
                 )
-                # Only add if it fits in message limit
-                if len(response) + len(sources_text) < config.MAX_RESPONSE_LENGTH:
-                    response += sources_text
-            
-            await update.message.reply_text(response)
+            except Exception as parse_error:
+                logger.warning(f"Markdown parse error, sending as plain text: {parse_error}")
+                # Remove markdown formatting and send as plain text
+                plain_response = response.replace('*', '').replace('_', '').replace('`', '')
+                await update.message.reply_text(
+                    plain_response,
+                    disable_web_page_preview=True
+                )
             
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)
             await update.message.reply_text(
-                "Sorry, I encountered an error processing your question. Please try again."
+                "Hmm, ran into an issue there. Mind rephrasing your question?"
             )
     
     def run(self):

@@ -21,9 +21,9 @@ class Config:
     ALLOWED_CHAT_IDS: Optional[list[int]] = None  # None = all chats allowed
     
     # Gemini AI
-    GEMINI_MODEL: str = "gemini-3-pro-preview"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_TEMPERATURE: float = 0.3
-    GEMINI_MAX_TOKENS: int = 1024
+    GEMINI_MAX_TOKENS: int = 2048
     
     # ChromaDB
     CHROMA_PERSIST_DIR: str = "./data/chroma"
@@ -53,9 +53,9 @@ class Config:
             TELEGRAM_BOT_TOKEN=os.getenv("TELEGRAM_BOT_TOKEN", ""),
             ALLOWED_CHAT_IDS=chat_ids,
             GEMINI_API_KEY=os.getenv("GEMINI_API_KEY", ""),
-            GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-3-pro-preview"),
+            GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             GEMINI_TEMPERATURE=float(os.getenv("GEMINI_TEMPERATURE", "0.3")),
-            GEMINI_MAX_TOKENS=int(os.getenv("GEMINI_MAX_TOKENS", "1024")),
+            GEMINI_MAX_TOKENS=int(os.getenv("GEMINI_MAX_TOKENS", "2048")),
             CHROMA_PERSIST_DIR=os.getenv("CHROMA_PERSIST_DIR", "./data/chroma"),
             CHROMA_COLLECTION_NAME=os.getenv("CHROMA_COLLECTION_NAME", "mudrex_api_docs"),
             EMBEDDING_MODEL=os.getenv("EMBEDDING_MODEL", "models/text-embedding-004"),

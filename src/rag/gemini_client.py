@@ -6,6 +6,7 @@ Licensed under MIT License - See LICENSE file for details.
 """
 import logging
 from typing import List, Dict, Any, Optional
+import os
 import google.generativeai as genai
 
 from ..config import config
@@ -18,6 +19,7 @@ class GeminiClient:
     
     def __init__(self):
         """Initialize Gemini client"""
+        # Configure Gemini
         genai.configure(api_key=config.GEMINI_API_KEY)
         self.model = genai.GenerativeModel(config.GEMINI_MODEL)
         logger.info(f"Initialized Gemini client with model: {config.GEMINI_MODEL}")
@@ -82,16 +84,43 @@ class GeminiClient:
         prompt = self._create_prompt(query, context, chat_history)
         
         try:
-            # Generate response
+            # Generate response with the updated SDK
             response = self.model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=config.GEMINI_TEMPERATURE,
                     max_output_tokens=config.GEMINI_MAX_TOKENS,
-                )
+                ),
+                safety_settings=[
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                ]
             )
             
-            answer = response.text.strip()
+            # Check if response has candidates
+            if not response or not response.candidates:
+                logger.warning("No response candidates from Gemini")
+                return "I couldn't generate a response. Please try rephrasing your question about the Mudrex API."
+            
+            # Try to extract text safely
+            try:
+                answer = response.text.strip()
+            except (ValueError, AttributeError) as e:
+                logger.error(f"Could not extract text from response: {e}")
+                # Try to get text from candidate parts
+                candidate = response.candidates[0]
+                if candidate.content and candidate.content.parts:
+                    answer = "".join(part.text for part in candidate.content.parts if hasattr(part, 'text')).strip()
+                else:
+                    return "I couldn't generate a complete response. Please try rephrasing your question about the Mudrex API."
+            
+            if not answer:
+                return "I couldn't find relevant information to answer your question. Please make sure you're asking about the Mudrex API."
+            
+            # Clean up and format the response
+            answer = self._clean_response(answer)
             
             # Ensure response isn't too long for Telegram
             if len(answer) > config.MAX_RESPONSE_LENGTH:
@@ -100,8 +129,46 @@ class GeminiClient:
             return answer
             
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
+            logger.error(f"Error generating response: {e}", exc_info=True)
             return "I encountered an error while processing your question. Please try again or rephrase your query."
+    
+    def _clean_response(self, text: str) -> str:
+        """Clean and format response for better Telegram display"""
+        import re
+        
+        # Remove excessive newlines (more than 2 consecutive)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # Fix markdown formatting issues
+        # Convert ### headers to bold text (Telegram doesn't support headers well)
+        text = re.sub(r'###\s+(.+)', r'*\1*', text)
+        text = re.sub(r'##\s+(.+)', r'*\1*', text)
+        text = re.sub(r'#\s+(.+)', r'*\1*', text)
+        
+        # Convert markdown lists to bullet points
+        text = re.sub(r'^\s*[-*]\s+', '• ', text, flags=re.MULTILINE)
+        
+        # Fix numbered lists
+        text = re.sub(r'^\s*(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
+        
+        # Ensure code blocks are properly formatted
+        # Replace triple backticks with single backticks for inline code if short
+        def replace_short_code_blocks(match):
+            code = match.group(1).strip()
+            # If code is single line and short, make it inline
+            if '\n' not in code and len(code) < 60:
+                return f'`{code}`'
+            return match.group(0)
+        
+        text = re.sub(r'```(?:http|json|python|javascript)?\n?(.+?)```', replace_short_code_blocks, text, flags=re.DOTALL)
+        
+        # Remove extra spaces
+        text = re.sub(r' +', ' ', text)
+        
+        # Ensure proper spacing around sections
+        text = text.strip()
+        
+        return text
     
     def _build_context(self, documents: List[Dict[str, Any]]) -> str:
         """Build context string from retrieved documents"""
@@ -124,26 +191,57 @@ class GeminiClient:
     ) -> str:
         """Create the complete prompt for Gemini"""
         
-        system_instruction = """You are a helpful API documentation assistant for Mudrex API.
+        system_instruction = """You are a highly skilled Mudrex community manager and developer intern with deep knowledge of the Mudrex API.
 
-Your role:
-- Answer ONLY questions related to Mudrex APIs, endpoints, authentication, and technical integration
-- Use the provided documentation context to give accurate answers
-- If the answer isn't in the documentation, say so clearly
-- Be concise and technical
-- Provide code examples when relevant
-- Include relevant endpoint names and parameters
+YOUR PERSONALITY:
+- Confident, friendly, and approachable - like a smart colleague, not a formal assistant
+- Speak naturally and conversationally - avoid robotic or overly formal language
+- You're part of the Mudrex community - use "we" when referring to Mudrex features
+- Smart and knowledgeable - IQ 200 level understanding of APIs and coding
+- Don't cite sources or say "according to documentation" - you just KNOW this stuff
+
+YOUR ROLE:
+- Help developers integrate with Mudrex API
+- Provide clear, accurate technical guidance
+- Write clean code examples when needed
+- Be concise but thorough - no fluff
+
+RESPONSE STYLE:
+- Start directly with the answer - no "Sure!" or "Of course!" prefixes
+- Be confident - "The endpoint uses..." not "According to docs, the endpoint uses..."
+- Use emojis very sparingly - only for emphasis when it helps (✓, ⚠️, 💡)
+- Keep it real and practical
+
+CODE EXAMPLES:
+- Always provide working code when relevant
+- Use proper formatting with ``` code blocks
+- Include all necessary headers, parameters
+- Show complete examples, not fragments
+
+FORMATTING FOR TELEGRAM:
+- Use *bold* for API names, endpoints, important terms
+- Use `code` for parameters, values, variable names
+- Use bullet points (•) for lists
+- Keep paragraphs short (2-3 sentences max)
+- Use line breaks for readability
 
 IMPORTANT RULES:
-- NEVER answer questions about trading strategies, market analysis, or financial advice
-- NEVER answer general cryptocurrency or trading questions
-- If asked about non-API topics, politely redirect to API-related questions
-- Stay strictly within the scope of API documentation
+- ONLY answer Mudrex API questions - stay technical
+- If asked about non-API topics, politely redirect
+- Never make up information - if you don't know, say so
+- Focus on practical solutions
 
-Format your responses clearly with:
-- Direct answers first
-- Code examples if applicable
-- References to specific endpoints or parameters
+Example tone:
+"The Futures API needs two headers: `X-Authentication` (your API secret) and `X-Time` (millisecond timestamp). Here's how to set it up:
+
+```python
+headers = {
+    'X-Authentication': 'your_secret_key',
+    'X-Time': str(int(time.time() * 1000))
+}
+```
+
+Make sure you're using milliseconds, not seconds - that's a common gotcha!"
 """
         
         prompt_parts = [system_instruction]

@@ -35,6 +35,15 @@ class GeminiClient:
         Returns:
             True if the message is API-related or contains code
         """
+        message_lower = message.lower().strip()
+        
+        # Allow common greetings and conversational phrases - let Gemini handle them naturally
+        greetings = ['hi', 'hello', 'hey', 'sup', 'yo', 'ok', 'okay', 'cool', 'thanks', 'thank you', 
+                     'good', 'great', 'nice', 'awesome', 'got it', 'understood', 'sure', 'yes', 'no',
+                     'who are you', 'what are you', 'what can you do', 'what do you do']
+        if message_lower in greetings or any(message_lower.startswith(g) for g in greetings):
+            return True  # Let conversational messages through
+        
         # Check for code blocks or code snippets
         has_code = bool(re.search(r'```|`[\w\s\(\)\[\]\{\}\.]+`|def |class |import |from |async |await |function |const |let |var ', message))
         
@@ -51,10 +60,8 @@ class GeminiClient:
             'python', 'javascript', 'node', 'typescript', 'react',
             'fix', 'debug', 'correct', 'wrong', 'broken', 'doesn\'t work',
             'order', 'trade', 'position', 'balance', 'portfolio',
-            'strategy', 'bot', 'trading', 'exchange', 'market'
+            'strategy', 'bot', 'trading', 'exchange', 'market', 'mudrex'
         ]
-        
-        message_lower = message.lower()
         
         # If message contains code, it's relevant
         if has_code:

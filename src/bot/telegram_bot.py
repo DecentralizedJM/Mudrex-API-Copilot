@@ -158,14 +158,13 @@ Built by the Mudrex API team 🚀
                 logger.info(f"Silently ignoring non-API message: {user_message[:50]}")
                 return  # Silently ignore non-API messages
         
-        # If mentioned but unclear, ask for clarification
+        # If mentioned with a greeting, respond warmly and invite engagement
         if bot_mentioned:
-            # Quick check if it's too vague
-            if len(user_message.split()) < 3 or user_message.strip() in ['hi', 'hello', 'hey', 'sup', 'yo']:
-                await update.message.reply_text(
-                    "Hey! What do you need help with regarding the Mudrex API? 🤔"
-                )
-                return
+            lower_msg = user_message.lower().strip()
+            # Check for simple greetings
+            if lower_msg in ['hi', 'hello', 'hey', 'sup', 'yo', 'ok', 'okay', 'cool', 'thanks', 'thank you']:
+                # Don't block - let it go through to Gemini for a friendly response
+                pass  # Continue to RAG pipeline
         
         # Show typing indicator
         await update.message.chat.send_action("typing")

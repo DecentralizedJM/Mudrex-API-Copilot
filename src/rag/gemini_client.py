@@ -114,7 +114,7 @@ class GeminiClient:
             # Check if response has candidates
             if not response or not response.candidates:
                 logger.warning("No response candidates from Gemini")
-                return "I couldn't generate a response. Please try rephrasing your question about the Mudrex API."
+                return "Hey! I'm here to help with the Mudrex API. What would you like to know? Feel free to ask about endpoints, authentication, placing orders, or share code you need help with! 😊"
             
             # Try to extract text safely
             try:
@@ -126,10 +126,10 @@ class GeminiClient:
                 if candidate.content and candidate.content.parts:
                     answer = "".join(part.text for part in candidate.content.parts if hasattr(part, 'text')).strip()
                 else:
-                    return "I couldn't generate a complete response. Please try rephrasing your question about the Mudrex API."
+                    return "Hmm, I'm having trouble generating a response. Could you rephrase your question? I'm here to help with anything related to the Mudrex API! 💡"
             
             if not answer:
-                return "I couldn't find relevant information to answer your question. Please make sure you're asking about the Mudrex API."
+                return "I'd love to help! I can assist with:\n• API authentication and setup\n• Placing and managing orders\n• Checking positions and balances\n• Debugging your code\n• Best practices and examples\n\nWhat would you like to know?"
             
             # Clean up and format the response
             answer = self._clean_response(answer)
@@ -142,7 +142,7 @@ class GeminiClient:
             
         except Exception as e:
             logger.error(f"Error generating response: {e}", exc_info=True)
-            return "I encountered an error while processing your question. Please try again or rephrase your query."
+            return "Oops! Something went wrong on my end. Let me try to help - what's your question about the Mudrex API? I'm here for code reviews, debugging, or answering API questions! 🚀"
     
     def _clean_response(self, text: str) -> str:
         """Clean and format response for better Telegram display"""
@@ -252,6 +252,14 @@ When asked "Why Mudrex?" or about benefits, highlight:
 Example: "Can I get kline/candlestick data?"
 Response template:
 "For real-time market data like klines, you'll want to check our Market Data endpoints or WebSocket streams. Our API focuses on powerful execution - placing orders, managing positions, tracking your portfolio, and monitoring account status. If you need specific market data features, let me know what you're building and I can suggest the best approach! Or tag @DecentralizedJM if you need clarification on available data endpoints."
+
+💬 **HANDLING CONVERSATIONAL/CASUAL QUESTIONS:**
+If someone asks casual questions like "What are you saying?", "Who are you?", "What can you do?":
+- Stay friendly and conversational
+- Briefly introduce yourself as Mudrex API coding assistant
+- Mention your key capabilities (code review, debugging, API help)
+- Invite them to ask about the API or share code
+- Example: "Hey! I'm your Mudrex API coding buddy! 😊 I help with code reviews, debugging, API questions, and best practices. Built the API with the team, so I know it inside-out. What would you like to build today?"
 
 HOW YOU HELP:
 1. **Code Review & Correction**: When users share code, analyze it and provide corrected versions

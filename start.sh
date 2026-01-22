@@ -2,7 +2,8 @@
 # Startup script for Mudrex Bot
 # Auto-ingests documentation if vector store doesn't exist
 
-set -e
+# Don't use set -e - we want to continue even if ingestion fails
+# The Python code will handle ingestion as fallback
 
 echo "🚀 Starting Mudrex API Bot..."
 
@@ -32,17 +33,15 @@ if [ ! -f "data/chroma/vectors.pkl" ]; then
     
     # Ingest documentation
     echo "📖 Ingesting documentation files..."
-    python3 scripts/ingest_docs.py || {
-        echo "❌ Failed to ingest docs. Bot will run without RAG knowledge base."
-        echo "🤖 Starting Telegram bot (without RAG)..."
-        exec python3 main.py
-    }
-    
-    # Verify ingestion
-    if [ -f "data/chroma/vectors.pkl" ]; then
-        echo "✅ Documentation ingested successfully!"
+    if python3 scripts/ingest_docs.py; then
+        # Verify ingestion
+        if [ -f "data/chroma/vectors.pkl" ]; then
+            echo "✅ Documentation ingested successfully!"
+        else
+            echo "⚠️  WARNING: Vector store file not created. Python fallback will try."
+        fi
     else
-        echo "⚠️  WARNING: Vector store file not created. Bot will run without RAG."
+        echo "⚠️  WARNING: Ingestion script failed. Python fallback will try."
     fi
 else
     echo "✅ Vector store found. Skipping ingestion."

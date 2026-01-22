@@ -1,12 +1,17 @@
 """
-Telegram Bot handlers and logic
+Mudrex API Bot - Telegram Handler
+GROUP-ONLY bot for private API traders community
+Responds only when mentioned/tagged in groups
 
 Copyright (c) 2025 DecentralizedJM (https://github.com/DecentralizedJM)
-Licensed under MIT License - See LICENSE file for details.
+Licensed under MIT License
 """
 import logging
-from typing import Optional
-from telegram import Update
+from typing import Optional, Dict
+from collections import defaultdict
+import time
+
+from telegram import Update, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -14,183 +19,430 @@ from telegram.ext import (
     filters,
     ContextTypes
 )
+from telegram.constants import ParseMode, ChatAction, ChatType
 
 from ..config import config
 from ..rag import RAGPipeline
+from ..mcp import MudrexMCPClient, MudrexTools
 
 logger = logging.getLogger(__name__)
 
 
-class MudrexBot:
-    """Telegram bot for Mudrex API documentation"""
+class RateLimiter:
+    """Simple rate limiter for group messages"""
     
-    def __init__(self, rag_pipeline: RAGPipeline):
-        """
-        Initialize the bot
+    def __init__(self, max_messages: int = 50, window_seconds: int = 60):
+        self.max_messages = max_messages
+        self.window = window_seconds
+        self.group_messages: Dict[int, list] = defaultdict(list)  # Per group
+    
+    def is_allowed(self, chat_id: int) -> bool:
+        """Check if group is within rate limit"""
+        now = time.time()
+        self.group_messages[chat_id] = [
+            t for t in self.group_messages[chat_id] 
+            if now - t < self.window
+        ]
         
-        Args:
-            rag_pipeline: RAG pipeline instance
-        """
+        if len(self.group_messages[chat_id]) >= self.max_messages:
+            return False
+        
+        self.group_messages[chat_id].append(now)
+        return True
+
+
+class MudrexBot:
+    """
+    Telegram bot for Mudrex API community group
+    GROUP-ONLY: Only responds in groups when mentioned/tagged
+    Focus: API questions, coding help, error debugging, feedback
+    """
+    
+    def __init__(self, rag_pipeline: RAGPipeline, mcp_client: Optional[MudrexMCPClient] = None):
         self.rag_pipeline = rag_pipeline
-        self.app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+        self.mcp_client = mcp_client
+        self.rate_limiter = RateLimiter(
+            max_messages=config.RATE_LIMIT_MESSAGES,
+            window_seconds=config.RATE_LIMIT_WINDOW
+        )
         
-        # Register handlers
+        self.app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
         self._register_handlers()
         
-        logger.info("Mudrex bot initialized")
+        logger.info("MudrexBot initialized (GROUP-ONLY mode)")
     
     def _register_handlers(self):
         """Register command and message handlers"""
-        # Commands
-        self.app.add_handler(CommandHandler("start", self.start_command))
-        self.app.add_handler(CommandHandler("help", self.help_command))
-        self.app.add_handler(CommandHandler("stats", self.stats_command))
+        # Commands - only work in groups
+        self.app.add_handler(CommandHandler("start", self.cmd_start, filters.ChatType.GROUPS))
+        self.app.add_handler(CommandHandler("help", self.cmd_help, filters.ChatType.GROUPS))
+        self.app.add_handler(CommandHandler("stats", self.cmd_stats, filters.ChatType.GROUPS))
+        self.app.add_handler(CommandHandler("tools", self.cmd_tools, filters.ChatType.GROUPS))
+        self.app.add_handler(CommandHandler("mcp", self.cmd_mcp, filters.ChatType.GROUPS))
+        self.app.add_handler(CommandHandler("futures", self.cmd_futures, filters.ChatType.GROUPS))
         
-        # Message handler for questions
+        # Message handler - ONLY in groups, only when mentioned/tagged
         self.app.add_handler(
             MessageHandler(
-                filters.TEXT & ~filters.COMMAND,
+                filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
                 self.handle_message
             )
         )
         
-        logger.info("Handlers registered")
+        # Reject DMs
+        self.app.add_handler(
+            MessageHandler(
+                filters.TEXT & filters.ChatType.PRIVATE,
+                self.reject_dm
+            )
+        )
+        
+        self.app.add_error_handler(self.error_handler)
+        logger.info("Handlers registered (GROUP-ONLY)")
     
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def reject_dm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Reject direct messages - bot only works in groups"""
+        if update.message:
+            await update.message.reply_text(
+                "👋 Hi! I'm a community bot for the Mudrex API traders group.\n\n"
+                "I only work in groups where API traders discuss:\n"
+                "• API integration questions\n"
+                "• Coding help and debugging\n"
+                "• Error troubleshooting\n"
+                "• Feedback and suggestions\n\n"
+                "Join the group and tag me with @ to ask questions!"
+            )
+    
+    async def setup_commands(self):
+        """Set up bot commands menu"""
+        commands = [
+            BotCommand("help", "Show help"),
+            BotCommand("tools", "Available API tools"),
+            BotCommand("mcp", "MCP setup guide"),
+            BotCommand("futures", "List futures contracts"),
+            BotCommand("stats", "Bot statistics"),
+        ]
+        await self.app.bot.set_my_commands(commands)
+    
+    # ==================== Commands ====================
+    
+    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
-        welcome_message = """I'm here to help with the Mudrex API.
-
-*I can help you with:*
-• API integration and authentication
-• Code review and debugging
-• Working code examples
-• Best practices
-
-Ask me anything about the Mudrex API or share code for review."""
-        await update.message.reply_text(welcome_message, parse_mode='Markdown')
-    
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /help command"""
-        help_message = """*Commands:*
-/start - Welcome message
-/help - This help
-/stats - Bot info
+        welcome = """Hey! I'm the Mudrex API community assistant.
 
 *I help with:*
-• API authentication and integration
-• Code debugging and fixes
-• Working examples in Python/JavaScript
-• Best practices
+- API integration questions
+- Code debugging and fixes
+- Error troubleshooting
+- MCP server setup
+- General API feedback
+
+*How to use:*
+Just ask your API question! I'll automatically detect and respond.
+Or tag me with @ to get my attention.
+
+*Commands:*
+/help - Full help
+/tools - MCP tools list
+/mcp - MCP setup guide
+
+I'm here to help the community! 🚀"""
+        
+        await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
+    
+    async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /help command"""
+        help_text = """*Mudrex API Community Bot Help*
+
+*How to use:*
+Just ask your API question! I'll respond if it's API-related.
+Or tag me with @botname to get my attention.
+
+*I help with:*
+- API authentication and headers
+- API endpoints and usage
+- Code examples (Python/JS)
+- Error debugging
+- MCP server setup
+- General API questions
 
 *Example questions:*
-"How do I authenticate?"
-"Fix this code: ```python...```"
-"Show me how to place an order"
+"How do I authenticate API requests?"
+"Why am I getting error -1121?"
+"Show me how to place a limit order"
+"Help debug this code: ```python...```"
+"How to set up MCP with Claude?"
 
-Tag me with @ in groups or just send your question."""
-        await update.message.reply_text(help_message, parse_mode='Markdown')
+*Note:* This is a generic community bot for API documentation and general help.
+For personal account data (positions, orders, balance), use Claude Desktop with MCP.
+
+*Commands:*
+/tools - List API tools
+/mcp - MCP setup guide
+/futures - List futures contracts
+/stats - Bot info
+
+*MCP Docs:* docs.trade.mudrex.com/docs/mcp
+
+I automatically detect API questions - no need to tag me!"""
+        
+        await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
     
-    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def cmd_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /stats command"""
         stats = self.rag_pipeline.get_stats()
         
-        stats_message = f"""*Bot Stats*
+        mcp_status = "Connected" if self.mcp_client and self.mcp_client.is_connected() else "Not connected"
+        
+        auth_status = "Service Account" if self.mcp_client and self.mcp_client.is_authenticated() else "Not configured"
+        
+        stats_text = f"""*Bot Stats*
 
-AI Model: {stats['model']}
-Docs Loaded: {stats['total_documents']} chunks
-Status: Online
+Model: {stats['model']}
+Docs: {stats['total_documents']} chunks
+MCP: {mcp_status}
+Auth: {auth_status}
+Mode: Group-only (Community Bot)
 
-Helping developers integrate the Mudrex API."""
-        await update.message.reply_text(stats_message, parse_mode='Markdown')
+_Helping the Mudrex API community_"""
+        
+        await update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
+    
+    async def cmd_tools(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /tools command"""
+        tools_text = """*Mudrex API Tools*
+
+*Public/General Tools:*
+- `list_futures` - List all available futures contracts
+- `get_future` - Get contract details by symbol
+
+*Note:* This bot uses a service account for public data only.
+For personal account data (positions, orders, balance), use Claude Desktop with MCP (your own API key) or the Mudrex web interface.
+
+Use /mcp for MCP setup instructions!"""
+        
+        await update.message.reply_text(tools_text, parse_mode=ParseMode.MARKDOWN)
+    
+    async def cmd_mcp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /mcp command"""
+        mcp_text = """*Mudrex MCP Setup Guide*
+
+*What is MCP?*
+MCP lets AI assistants like Claude interact with your Mudrex account.
+
+*Setup with Claude Desktop:*
+
+1. Install Node.js from nodejs.org
+2. Open Claude Desktop Settings > Developer > Edit Config
+3. Add this config:
+```
+{
+  "mcpServers": {
+    "mcp-futures-trading": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mudrex.com/mcp", "--header", "X-Authentication:${API_SECRET}"],
+      "env": {"API_SECRET": "<your-api-secret>"}
+    }
+  }
+}
+```
+4. Get API secret from trade.mudrex.com
+5. Restart Claude Desktop
+
+*Full docs:* docs.trade.mudrex.com/docs/mcp"""
+        
+        await update.message.reply_text(mcp_text, parse_mode=ParseMode.MARKDOWN)
+    
+    async def cmd_futures(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /futures command - list public futures contracts"""
+        await update.message.chat.send_action(ChatAction.TYPING)
+        
+        if not self.mcp_client:
+            await update.message.reply_text(
+                "*List Futures*\n\n"
+                "MCP not connected. This is a general community bot.\n\n"
+                "For personal account data, use Claude Desktop with MCP:\n"
+                "`List all available futures contracts on Mudrex`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        # Only public/general data - no authentication needed
+        result = await self.mcp_client.call_tool('list_futures')
+        
+        if result.get('success'):
+            data = result.get('data', {})
+            text = str(data)[:3500]
+            await update.message.reply_text(
+                f"*Available Futures Contracts*\n\n```\n{text}\n```\n\n"
+                "_Note: This is general information. For personal account data, use Claude Desktop with MCP._",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text(
+                f"Couldn't fetch contracts list. {result.get('message', 'Unknown error')}\n\n"
+                "This is a community bot for general API help."
+            )
+    
+    # ==================== Message Handler ====================
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle incoming text messages"""
+        """
+        Handle incoming messages in groups
+        Responds when:
+        1. Bot is mentioned/tagged (always)
+        2. Message is clearly API-related (smart detection)
+        Ignores off-topic messages when not tagged
+        """
         if not update.message or not update.message.text:
             return
         
-        # Check if chat is allowed (if restrictions are enabled)
-        if config.ALLOWED_CHAT_IDS:
-            if update.effective_chat.id not in config.ALLOWED_CHAT_IDS:
-                logger.warning(f"Unauthorized chat: {update.effective_chat.id}")
-                return
+        # Ensure we're in a group
+        if update.effective_chat.type not in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            logger.debug(f"Ignored non-group message from {update.effective_chat.type}")
+            return
         
-        user_message = update.message.text
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
         user_name = update.effective_user.first_name
+        message = update.message.text
         
-        # Check if bot is mentioned (@username or reply)
-        bot_mentioned = False
-        if update.message.reply_to_message and update.message.reply_to_message.from_user.is_bot:
-            bot_mentioned = True
-        elif update.message.entities:
-            for entity in update.message.entities:
-                if entity.type == "mention" or entity.type == "text_mention":
-                    bot_mentioned = True
-                    break
+        # Check if bot is mentioned/tagged
+        bot_mentioned = self._is_bot_mentioned(update)
         
-        logger.info(f"Message from {user_name}: {user_message[:50]}, mentioned={bot_mentioned}")
+        # Check if message is API-related
+        is_api_related = self.rag_pipeline.gemini_client.is_api_related_query(message)
         
-        # If bot is mentioned, ALWAYS respond - even if unclear, ask for clarification
-        if bot_mentioned:
-            # Let all messages through when tagged
-            pass
-        else:
-            # Check if message is API-related when not mentioned
-            is_api_related = self.rag_pipeline.gemini_client.is_api_related_query(user_message)
-            if not is_api_related:
-                logger.info(f"Silently ignoring non-API message: {user_message[:50]}")
-                return  # Silently ignore non-API messages
+        # Respond if:
+        # 1. Bot is mentioned/tagged (always respond)
+        # 2. Message is clearly API-related (smart detection)
+        # Otherwise, silently ignore
+        if not bot_mentioned and not is_api_related:
+            logger.debug(f"Not mentioned and not API-related, ignoring message from {user_name}")
+            return
         
-        # Show typing indicator
-        await update.message.chat.send_action("typing")
+        # Access control (if configured)
+        if config.ALLOWED_CHAT_IDS and chat_id not in config.ALLOWED_CHAT_IDS:
+            logger.warning(f"Unauthorized group: {chat_id}")
+            return
+        
+        # Rate limiting (per group)
+        if not self.rate_limiter.is_allowed(chat_id):
+            await update.message.reply_text(
+                "Slow down! Too many requests from this group. Try again in a minute."
+            )
+            return
+        
+        logger.info(f"Group message from {user_name} in {chat_id}: {message[:50]}... | mentioned={bot_mentioned} | api_related={is_api_related}")
+        
+        # If tagged but not API-related, redirect to API topics
+        if bot_mentioned and not is_api_related:
+            await update.message.reply_text(
+                "I'm here to help with Mudrex API questions! Ask me about:\n"
+                "• API integration and authentication\n"
+                "• Code debugging and errors\n"
+                "• MCP server setup\n"
+                "• Order/position management\n\n"
+                "What would you like to know?"
+            )
+            return
+        
+        await update.message.chat.send_action(ChatAction.TYPING)
         
         try:
-            # Get chat history (last few messages from context)
-            chat_history = context.user_data.get('history', [])
+            # Get chat history (per group)
+            history_key = f"history_{chat_id}"
+            chat_history = context.chat_data.get(history_key, [])
             
-            # Query the RAG pipeline
-            result = self.rag_pipeline.query(
-                user_message,
-                chat_history=chat_history
-            )
+            # Query RAG pipeline
+            result = self.rag_pipeline.query(message, chat_history=chat_history)
             
-            # Update chat history
-            chat_history.append({'role': 'user', 'content': user_message})
+            # Update history
+            chat_history.append({'role': 'user', 'content': message})
             chat_history.append({'role': 'assistant', 'content': result['answer']})
+            context.chat_data[history_key] = chat_history[-6:]  # Keep last 6 per group
             
-            # Keep only last 6 messages (3 exchanges)
-            context.user_data['history'] = chat_history[-6:]
-            
-            # Send response (NO sources - we're confident!)
-            response = result['answer']
-            
-            # Try to send with Markdown, fallback to plain text if it fails
-            try:
-                await update.message.reply_text(
-                    response,
-                    parse_mode='Markdown',
-                    disable_web_page_preview=True
-                )
-            except Exception as parse_error:
-                logger.warning(f"Markdown parse error, sending as plain text: {parse_error}")
-                # Remove markdown formatting and send as plain text
-                plain_response = response.replace('*', '').replace('_', '').replace('`', '')
-                await update.message.reply_text(
-                    plain_response,
-                    disable_web_page_preview=True
-                )
+            # Send response
+            await self._send_response(update, result['answer'])
             
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)
             await update.message.reply_text(
-                "Hmm, ran into an issue there. Mind rephrasing your question?"
+                "Hit a snag there. Mind rephrasing your question?"
             )
     
+    def _is_bot_mentioned(self, update: Update) -> bool:
+        """
+        Check if bot is mentioned/tagged in the message
+        Returns True if:
+        - Bot is @mentioned
+        - Message is a reply to bot's message
+        - Bot username is in the message
+        """
+        if not update.message:
+            return False
+        
+        # Check if replying to bot
+        if update.message.reply_to_message:
+            if update.message.reply_to_message.from_user and update.message.reply_to_message.from_user.is_bot:
+                return True
+        
+        # Check for @mentions
+        if update.message.entities:
+            bot_username = self.app.bot.username.lower() if self.app.bot.username else None
+            for entity in update.message.entities:
+                if entity.type == "mention":
+                    # Extract mentioned username
+                    mention = update.message.text[entity.offset:entity.offset + entity.length].lower()
+                    if bot_username and bot_username in mention:
+                        return True
+                elif entity.type == "text_mention":
+                    # Direct user mention
+                    if entity.user and entity.user.is_bot:
+                        return True
+        
+        # Check if bot username appears in text (case-insensitive)
+        if self.app.bot.username:
+            if f"@{self.app.bot.username.lower()}" in update.message.text.lower():
+                return True
+        
+        return False
+    
+    async def _send_response(self, update: Update, response: str):
+        """Send response with markdown fallback"""
+        try:
+            await update.message.reply_text(
+                response,
+                parse_mode=ParseMode.MARKDOWN,
+                disable_web_page_preview=True
+            )
+        except Exception:
+            # Strip markdown if parsing fails
+            plain = response.replace('*', '').replace('_', '').replace('`', '')
+            await update.message.reply_text(plain, disable_web_page_preview=True)
+    
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle errors"""
+        logger.error(f"Error: {context.error}", exc_info=context.error)
+        if update and update.message:
+            await update.message.reply_text("Something went wrong. Try again?")
+    
     def run(self):
-        """Start the bot"""
-        logger.info("Starting Mudrex API bot...")
+        """Start the bot (blocking)"""
+        logger.info("Starting MudrexBot (GROUP-ONLY)...")
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    async def start_async(self):
+        """Start the bot (async)"""
+        await self.app.initialize()
+        await self.setup_commands()
+        await self.app.start()
+        await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("MudrexBot started (GROUP-ONLY mode)")
     
     async def stop(self):
         """Stop the bot gracefully"""
-        logger.info("Stopping bot...")
+        logger.info("Stopping MudrexBot...")
+        await self.app.updater.stop()
         await self.app.stop()
+        await self.app.shutdown()

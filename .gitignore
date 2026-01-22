@@ -1,12 +1,20 @@
-# Byte-compiled / optimized / DLL files
+# ============================================
+# Mudrex API Bot - Git Ignore
+# ============================================
+
+# Environment & Secrets (NEVER COMMIT!)
+.env
+.env.local
+.env.production
+*.env
+secrets.json
+api_keys.txt
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -24,44 +32,44 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyInstaller
-*.manifest
-*.spec
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# Environments
-.env
-.venv
-env/
+# Virtual environments
 venv/
 ENV/
-env.bak/
-venv.bak/
+env/
+.venv/
 
-# IDEs
-.vscode/
+# Data & Vector Store
+data/
+*.pkl
+*.pickle
+chroma/
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+bot.log
+
+# IDE
 .idea/
+.vscode/
 *.swp
 *.swo
 *~
-
-# Project specific
-data/
-*.log
-*.db
 .DS_Store
 
-# ChromaDB
-chroma/
-*.sqlite3
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Railway
+.railway/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

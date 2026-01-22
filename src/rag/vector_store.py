@@ -1,8 +1,9 @@
 """
 Vector database handler using simple file-based storage with sklearn
+Updated to use NEW google-genai SDK for embeddings
 
 Copyright (c) 2025 DecentralizedJM (https://github.com/DecentralizedJM)
-Licensed under MIT License - See LICENSE file for details.
+Licensed under MIT License
 """
 import logging
 from typing import List, Optional, Dict, Any
@@ -11,7 +12,8 @@ import os
 from pathlib import Path
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-import google.generativeai as genai
+
+from google import genai
 
 from ..config import config
 
@@ -28,8 +30,12 @@ class VectorStore:
         
         self.db_file = self.persist_dir / "vectors.pkl"
         
-        # Configure Gemini for embeddings
-        genai.configure(api_key=config.GEMINI_API_KEY)
+        # Set API key in environment
+        if config.GEMINI_API_KEY:
+            os.environ['GEMINI_API_KEY'] = config.GEMINI_API_KEY
+        
+        # Initialize new Gemini client for embeddings
+        self.client = genai.Client()
         
         # Load existing database or create new
         if self.db_file.exists():
@@ -62,14 +68,14 @@ class VectorStore:
             }, f)
     
     def _get_embedding(self, text: str) -> List[float]:
-        """Get embedding for text using Gemini"""
+        """Get embedding for text using NEW Gemini SDK"""
         try:
-            result = genai.embed_content(
+            # Use the new SDK format for embeddings
+            result = self.client.models.embed_content(
                 model=config.EMBEDDING_MODEL,
-                content=text,
-                task_type="retrieval_document"
+                contents=text,
             )
-            return result['embedding']
+            return result.embeddings[0].values
         except Exception as e:
             logger.error(f"Error getting embedding: {e}")
             # Return zero vector as fallback

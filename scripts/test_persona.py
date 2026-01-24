@@ -71,5 +71,17 @@ def test_persona():
     else:
         print("   ❌ Bot FAILED to ignore irrelevant query")
 
+    # Test Latency Knowledge
+    print("\n6. Testing Latency Knowledge:")
+    q_latency = "What is the rate limit and latency?"
+    response = rag.query(q_latency)
+    print(f"Q: {q_latency}")
+    print(f"A: {response['answer'][:150]}...")
+    
+    if "2 requests/second" in response['answer'] and "100-300ms" in response['answer']:
+        print("   ✅ Bot answered BOTH rate limit and latency")
+    else:
+        print("   ❌ Bot failed to provide complete info")
+
 if __name__ == "__main__":
     test_persona()

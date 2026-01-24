@@ -342,7 +342,7 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         """
         user_id = update.effective_user.id
         if not self._is_admin(user_id):
-            await update.message.reply_text("🚫 Admin only.")
+            await update.message.reply_text(f"🚫 Admin only. Your ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
             return
 
         text = " ".join(context.args)
@@ -363,7 +363,7 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         """
         user_id = update.effective_user.id
         if not self._is_admin(user_id):
-            await update.message.reply_text("🚫 Admin only.")
+            await update.message.reply_text(f"🚫 Admin only. Your ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
             return
 
         if len(context.args) < 2:
@@ -386,7 +386,7 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         """
         user_id = update.effective_user.id
         if not self._is_admin(user_id):
-            await update.message.reply_text("🚫 Admin only.")
+            await update.message.reply_text(f"🚫 Admin only. Your ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
             return
 
         if not context.args:

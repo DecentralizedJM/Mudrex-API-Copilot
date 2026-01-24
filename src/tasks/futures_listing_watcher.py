@@ -1,9 +1,9 @@
 """
 Futures Listing Watcher
 
-Uses MCP list_futures to fetch all futures contracts, diffs against the last
-snapshot, and detects newly listed and delisted tokens. Used by the daily
-scheduler to broadcast changes to ALLOWED_CHAT_IDS.
+Fetches active futures via GET /fapi/v1/futures (REST), diffs vs last snapshot,
+and detects newly listed and delisted. Used for /listfutures count and daily
+broadcast to ALLOWED_CHAT_IDS.
 
 Copyright (c) 2025 DecentralizedJM
 Licensed under MIT License
@@ -14,6 +14,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Set
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +110,56 @@ def _extract_symbols(data: Any) -> Set[str]:
     return symbols
 
 
-# Page size for list_futures. We paginate until the API returns 0, so total can exceed this.
+# Page size for GET /fapi/v1/futures. Paginate until the API returns fewer items.
 _LIST_FUTURES_PAGE_SIZE = 500
-# Safety cap: stop after fetching this many items to avoid runaway loops.
 _LIST_FUTURES_MAX_ITEMS = 5000
+
+# REST: GET /fapi/v1/futures — https://docs.trade.mudrex.com/docs/get-asset-listing
+_FUTURES_REST_URL = "https://trade.mudrex.com/fapi/v1/futures"
+
+
+async def fetch_all_futures_symbols_via_rest(api_secret: str) -> Set[str]:
+    """
+    Fetch all active futures symbols via GET /fapi/v1/futures (paginated).
+    Uses limit and offset; response shape: { "success": true, "data": [ {"symbol": "BTCUSDT", ...}, ... ] }.
+    """
+    if not api_secret:
+        return set()
+    headers = {"X-Authentication": api_secret}
+    all_symbols: Set[str] = set()
+    offset = 0
+    limit = _LIST_FUTURES_PAGE_SIZE
+    max_items = _LIST_FUTURES_MAX_ITEMS
+    async with aiohttp.ClientSession() as session:
+        while offset < max_items:
+            url = f"{_FUTURES_REST_URL}?limit={limit}&offset={offset}"
+            try:
+                async with session.get(
+                    url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status != 200:
+                        break
+                    data = await resp.json()
+            except (aiohttp.ClientError, ValueError) as e:
+                logger.warning(f"REST GET /fapi/v1/futures error: {e}")
+                break
+            if not isinstance(data, dict) or not data.get("success") or "data" not in data:
+                break
+            arr = data["data"]
+            if not isinstance(arr, list):
+                break
+            before = len(all_symbols)
+            syms = _extract_from_list(arr)
+            all_symbols |= syms
+            n = len(arr)
+            if n == 0:
+                break
+            if n > 0 and len(all_symbols) == before:
+                break
+            offset += n
+            if n < limit:
+                break
+    return all_symbols
 
 
 async def fetch_all_futures_symbols(mcp_client) -> Set[str]:
@@ -149,22 +197,25 @@ async def fetch_all_futures_symbols(mcp_client) -> Set[str]:
     return all_symbols
 
 
-async def run(mcp_client) -> tuple[bool, str]:
+async def run(mcp_client=None, api_secret=None) -> tuple[bool, str]:
     """
-    Fetch current futures via MCP list_futures, diff vs last snapshot, persist state.
+    Fetch current futures via GET /fapi/v1/futures (REST) or MCP list_futures,
+    diff vs last snapshot, persist state. Prefers REST when api_secret is set.
 
     Returns:
         (changed: bool, summary: str)
-        If there are newly listed or delisted symbols, summary is a short message
-        for the broadcast. Otherwise "".
     """
-    if not mcp_client or not getattr(mcp_client, "is_authenticated", lambda: False)():
-        logger.debug("Futures listing watcher: no authenticated MCP client; skipping")
+    api_secret = api_secret or (getattr(mcp_client, "api_secret", None) if mcp_client else None)
+    if not api_secret and not (mcp_client and getattr(mcp_client, "is_authenticated", lambda: False)()):
+        logger.debug("Futures listing watcher: no api_secret or MCP; skipping")
         return False, ""
 
-    current = await fetch_all_futures_symbols(mcp_client)
+    if api_secret:
+        current = await fetch_all_futures_symbols_via_rest(api_secret)
+    else:
+        current = await fetch_all_futures_symbols(mcp_client)
     if not current:
-        logger.warning("Futures listing watcher: no symbols extracted from list_futures response")
+        logger.warning("Futures listing watcher: no symbols extracted")
 
     _ensure_data_dir()
     previous: Set[str] = set()

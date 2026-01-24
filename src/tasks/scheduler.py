@@ -35,11 +35,11 @@ async def _run_daily_docs_and_changelog(bot, rag_pipeline, docs_dir: Path):
             elif changed and (not config.ALLOWED_CHAT_IDS or len(config.ALLOWED_CHAT_IDS) == 0):
                 logger.info("Changelog changed but ALLOWED_CHAT_IDS not set; skipping broadcast")
 
-            # 1b) Futures listing watcher: list_futures via MCP, diff vs snapshot, broadcast if changed
+            # 1b) Futures listing watcher: GET /fapi/v1/futures (REST) or MCP, diff vs snapshot, broadcast if changed
             mcp_client = getattr(bot, "mcp_client", None)
-            if getattr(config, "ENABLE_FUTURES_LISTING_WATCHER", True) and mcp_client:
+            if getattr(config, "ENABLE_FUTURES_LISTING_WATCHER", True) and (getattr(config, "MUDREX_API_SECRET", None) or mcp_client):
                 from .futures_listing_watcher import run as futures_listing_run
-                fl_changed, fl_summary = await futures_listing_run(mcp_client)
+                fl_changed, fl_summary = await futures_listing_run(mcp_client, api_secret=getattr(config, "MUDREX_API_SECRET", None))
                 if fl_changed and fl_summary and config.ALLOWED_CHAT_IDS:
                     for cid in config.ALLOWED_CHAT_IDS:
                         try:

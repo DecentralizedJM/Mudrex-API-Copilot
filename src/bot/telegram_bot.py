@@ -25,7 +25,7 @@ from telegram.constants import ParseMode, ChatAction, ChatType
 from ..config import config
 from ..rag import RAGPipeline
 from ..mcp import MudrexMCPClient, MudrexTools
-from ..tasks.futures_listing_watcher import fetch_all_futures_symbols
+from ..tasks.futures_listing_watcher import fetch_all_futures_symbols, fetch_all_futures_symbols_via_rest
 
 logger = logging.getLogger(__name__)
 
@@ -345,24 +345,24 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         await update.message.reply_text(mcp_text, parse_mode=ParseMode.MARKDOWN)
     
     async def cmd_listfutures(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /listfutures command — list public futures count"""
+        """Handle /listfutures — count via GET /fapi/v1/futures (REST) or MCP fallback."""
         await update.message.chat.send_action(ChatAction.TYPING)
-        
-        if not self.mcp_client:
+        doc_url = "https://docs.trade.mudrex.com/docs/get-asset-listing"
+        msg_tail = f"To see the full list: GET /fapi/v1/futures — {doc_url}"
+
+        if config.MUDREX_API_SECRET:
+            symbols = await fetch_all_futures_symbols_via_rest(config.MUDREX_API_SECRET)
+        elif self.mcp_client:
+            symbols = await fetch_all_futures_symbols(self.mcp_client)
+        else:
             await update.message.reply_text(
-                "*List Futures*\n\n"
-                "MCP not connected. This is a general community bot.\n\n"
-                "For personal account data, use Claude Desktop with MCP:\n"
-                "`List all available futures contracts on Mudrex`",
+                f"*List futures*\n\n{msg_tail}\n\nSet MUDREX_API_SECRET in .env to show the count here.",
                 parse_mode=ParseMode.MARKDOWN
             )
             return
-        
-        symbols = await fetch_all_futures_symbols(self.mcp_client)
         n = len(symbols)
         await update.message.reply_text(
-            f"There are **{n}** futures pairs listed. To see the full list, use the `list_futures` MCP tool "
-            "or the futures API at docs.trade.mudrex.com.",
+            f"There are **{n}** futures pairs listed. {msg_tail}",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -585,26 +585,25 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
             history_key = f"history_{chat_id}"
             chat_history = context.chat_data.get(history_key, [])
             
-            # AI co-pilot: use MCP whenever the query needs live data
+            # AI co-pilot: live data via REST (GET /fapi/v1/futures) or MCP
             mcp_context = None
-            if self.mcp_client and self.mcp_client.is_authenticated():
-                mcp_info = self._resolve_mcp_call(message)
-                if mcp_info:
-                    tool_name, params = mcp_info
-                    # list_futures: use paginated fetch, reply with count only
-                    if tool_name == "list_futures":
-                        symbols = await fetch_all_futures_symbols(self.mcp_client)
-                        n = len(symbols)
-                        await update.message.reply_text(
-                            f"There are **{n}** futures pairs listed. To see the full list, use the `list_futures` MCP tool "
-                            "or the futures API at docs.trade.mudrex.com.",
-                            parse_mode=ParseMode.MARKDOWN
-                        )
-                        return
-                    res = await self.mcp_client.call_tool(tool_name, params)
-                    if res.get("success") and res.get("data"):
-                        mcp_context = self._format_mcp_for_context(res)
-                        logger.info(f"MCP co-pilot: {tool_name} -> {len(mcp_context or '')} chars")
+            mcp_info = self._resolve_mcp_call(message)
+            # list_futures: REST (preferred) or MCP, reply with count and GET /fapi/v1/futures doc
+            if mcp_info and mcp_info[0] == "list_futures" and (config.MUDREX_API_SECRET or (self.mcp_client and self.mcp_client.is_authenticated())):
+                symbols = await fetch_all_futures_symbols_via_rest(config.MUDREX_API_SECRET) if config.MUDREX_API_SECRET else await fetch_all_futures_symbols(self.mcp_client)
+                n = len(symbols)
+                doc_url = "https://docs.trade.mudrex.com/docs/get-asset-listing"
+                await update.message.reply_text(
+                    f"There are **{n}** futures pairs listed. To see the full list: GET /fapi/v1/futures — {doc_url}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            if self.mcp_client and self.mcp_client.is_authenticated() and mcp_info:
+                tool_name, params = mcp_info
+                res = await self.mcp_client.call_tool(tool_name, params)
+                if res.get("success") and res.get("data"):
+                    mcp_context = self._format_mcp_for_context(res)
+                    logger.info(f"MCP co-pilot: {tool_name} -> {len(mcp_context or '')} chars")
             
             result = self.rag_pipeline.query(message, chat_history=chat_history, mcp_context=mcp_context)
             

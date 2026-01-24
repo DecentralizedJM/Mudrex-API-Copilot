@@ -26,7 +26,7 @@ This guide covers common errors encountered when running the Mudrex API trading 
 ### Rate Limited (429)
 **Log**: `[WARNING] mudrex.client: Rate limited, retrying in 1.0s...`
 **Cause**: You are making too many requests too fast.
-- Public Limit: ~2 requests per second.
+- Public Limit: **STRICTLY 2 requests per second**. (Not 100).
 - Private Limit: Varies by endpoint.
 **Solution**:
 - The SDK automatically retries.

@@ -60,5 +60,16 @@ def test_persona():
     else:
         print("   ⚠️  Bot might be too responsive to chitchat")
 
+    # Test Strict Filtering (Mars Dust)
+    print("\n5. Testing Strict Filtering (Mars Dust):")
+    q_irrelevant = "What is the price of Mars dust?"
+    is_related = client.is_api_related_query(q_irrelevant)
+    print(f"Q: '{q_irrelevant}' -> detected? {is_related}")
+    
+    if not is_related:
+        print("   ✅ Bot correctly IGNORED irrelevant query")
+    else:
+        print("   ❌ Bot FAILED to ignore irrelevant query")
+
 if __name__ == "__main__":
     test_persona()

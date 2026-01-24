@@ -26,34 +26,27 @@ class GeminiClient:
     
     # Bot personality - Technical Community Manager & Debugger
     SYSTEM_INSTRUCTION = """You are **MudrexBot** - the **Technical Community Manager** for the Mudrex API group.
-You are a Senior DevOps Engineer who creates order from chaos.
 
-## core directives
-1.  **DEBUG EVERYTHING**: If a user mentions an error, log, or "it's not working", you DO NOT ask "how can I help". You **diagnose** the issue immediately.
-2.  **ZERO CHIT-CHAT**: Do not waste pixels. No "Hello! I am here to help". Just the answer.
-3.  **DETECT LOGS**: If you see logs (timestamps, `[ERROR]`, tracebacks), analyze them instantly.
-    - `409` -> "Conflict: You have multiple bot instances running."
-    - `401/1022` -> "Auth Error: Check your API Secret."
-    - `429` -> "Rate Limit: Slow down your requests."
+## CORE DIRECTIVES (STRICT ADHERENCE REQUIRED)
+1.  **NO HALLUCINATIONS**: You ONLY answer based on the **Relevant Documentation** provided below. If the answer is not in the context, you MUST say: "I don't have that info in my docs. @DecentralizedJM can you help?"
+2.  **DEBUG FIRST**: If logs are present, analyze them immediately using the Knowledge Base below.
+3.  **ZERO CHIT-CHAT**: Be robotic but helpful. Direct answers only.
 
-## RESPONSE STYLE
-- **User**: "My bot is crashing [logs pasted]"
-- **Bad**: "I see you are having an issue. Can you share more?"
-- **Good**: "❌ **Conflict Error (409)**. You are running two instances of the bot. Kill the old process."
+## RESPONSE PROTOCOL
+- **If known (in context)**: Answer directly and confidently.
+- **If inferred**: State "Based on similar endpoints..." but warn it's an estimation.
+- **If unknown (NOT in context)**: "Unknown API question. @DecentralizedJM please assist." (Do not add fluff. Just tag).
 
-- **User**: "How do I get candles?"
-- **Good**: "Use `GET /fapi/v1/klines`. Example: ..."
+## KNOWLEDGE BASE (Errors)
+- **429 Rate Limit**: STRICTLY **2 requests/second**.
+- **409 Conflict**: Multiple instances running.
+- **-1121**: Invalid Symbol.
 
-## DATA PRIVACY (Service Account)
-- You use a shared **Service Account**. You can see PUBLIC data (prices) but NOT private data (balances/orders).
-- If asked for personal data: "I use a shared public key. Use the Mudrex Dashboard or Claude Desktop for personal account data."
+## DATA PRIVACY
+- You use a shared **Service Account** (Public Data Only).
+- No personal balances/orders accessible.
 
-## KNOWLEDGE BASE
-- **Telegram 409**: Conflict (Multiple instances)
-- **Error -1121**: Invalid Symbol (Use BTCUSDT, not BTC-USDT)
-- **Error -1022**: Signature Mismatch (Check system clock and API Secret)
-
-Be the expert they need, not the chatbot they annoy."""
+Be the expert. If you don't know, escalate."""
     
     def __init__(self):
         """Initialize Gemini client with NEW SDK"""
@@ -64,6 +57,7 @@ Be the expert they need, not the chatbot they annoy."""
         # Initialize the new client
         self.client = genai.Client()
         self.model_name = config.GEMINI_MODEL
+        self.temperature = 0.1 # Low temperature for strict factual answers
         
         logger.info(f"Initialized Gemini client (new SDK): {self.model_name}")
     
@@ -131,42 +125,36 @@ Be the expert they need, not the chatbot they annoy."""
                 return True
         
         # API and trading keywords
-        api_keywords = [
-            # API terms
-            'api', 'endpoint', 'authentication', 'auth', 'token', 'key', 'secret',
-            'request', 'response', 'header', 'parameter', 'param', 'payload', 'json',
-            'webhook', 'websocket', 'ws', 'sse', 'stream', 'mcp',
-            'rate limit', 'throttle', 'quota',
-            
-            # HTTP
-            'get', 'post', 'put', 'delete', 'patch', 'http', 'https', 'url', 'uri',
-            'status code', '200', '400', '401', '403', '404', '500',
-            
-            # Trading terms
-            'order', 'trade', 'position', 'balance', 'portfolio', 'margin',
-            'leverage', 'liquidation', 'pnl', 'profit', 'loss',
-            'buy', 'sell', 'long', 'short', 'market', 'limit', 'stop',
-            'sl', 'tp', 'stop loss', 'take profit',
-            
-            # Mudrex specific
-            'mudrex', 'futures', 'perpetual', 'usdt', 'fapi',
-            
-            # Development
-            'python', 'javascript', 'node', 'typescript', 'sdk', 'library',
-            'error', 'bug', 'fix', 'debug', 'issue', 'problem', 'help',
-            'example', 'sample', 'code', 'snippet', 'how to', 'how do',
-            
-            # Questions
-            'can i', 'does it', 'is it', 'what is', 'why', 'when', 'where',
+        # STRONG keywords (Sufficient alone if msg length > 5)
+        strong_keywords = [
+            'mudrex', 'fapi', 'api', 'endpoint', 'webhook', 'websocket', 'mcp',
+            'x-authentication', 'auth', 'token', 'secret', 'jwt',
+            'btc', 'eth', 'usdt', 'futures', 'perpetual'
         ]
         
-        # Check for keywords
-        keyword_count = sum(1 for kw in api_keywords if kw in message_lower)
+        # WEAK keywords (Need at least one STRONG keyword or another WEAK keyword)
+        weak_keywords = [
+            'price', 'order', 'trade', 'position', 'balance', 'margin',
+            'leverage', 'liquidation', 'profit', 'loss', 'buy', 'sell',
+            'long', 'short', 'market', 'limit', 'stop', 'error', 'bug',
+            'fix', 'help', 'code', 'python', 'javascript'
+        ]
         
-        # Stricter Rule: Must have at least one keyword AND be substantial
-        if keyword_count >= 1 and len(message.split()) > 3:
+        # Count matches
+        strong_count = sum(1 for kw in strong_keywords if kw in message_lower)
+        weak_count = sum(1 for kw in weak_keywords if kw in message_lower)
+        
+        # LOGIC:
+        # 1. Any STRONG keyword -> Pass
+        # 2. At least 2 WEAK keywords -> Pass (e.g. "price limit")
+        # 3. Otherwise -> Ignore (e.g. "price of mars dust" has only "price")
+        
+        if strong_count >= 1:
             return True
-        
+            
+        if weak_count >= 2:
+            return True
+            
         return False
     
     def generate_response(
@@ -196,7 +184,7 @@ Be the expert they need, not the chatbot they annoy."""
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=self.SYSTEM_INSTRUCTION,
-                    temperature=config.GEMINI_TEMPERATURE,
+                    temperature=self.temperature,
                     max_output_tokens=config.GEMINI_MAX_TOKENS,
                 )
             )

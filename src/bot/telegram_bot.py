@@ -74,12 +74,6 @@ class MudrexBot:
     
     def _register_handlers(self):
         """Register command and message handlers"""
-        # #region agent log
-        try:
-            _dbg = {"hypothesisId":"H1","location":"telegram_bot:_register_handlers","message":"cmd_futures exists","data":{"has_cmd_futures":hasattr(self,"cmd_futures"),"has_cmd_listfutures":hasattr(self,"cmd_listfutures")},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"startup"}
-            open("/Users/jm/Repo Clones/Mudrex-API-Intelligent-Assitant-1/.cursor/debug.log","a").write(__import__("json").dumps(_dbg)+"\n")
-        except Exception: pass
-        # #endregion
         # Commands - Available in Groups AND DMs
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("help", self.cmd_help))

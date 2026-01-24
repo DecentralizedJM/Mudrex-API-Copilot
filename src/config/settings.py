@@ -98,7 +98,7 @@ class Config:
             # RAG
             EMBEDDING_MODEL=os.getenv("EMBEDDING_MODEL", "models/text-embedding-004"),
             TOP_K_RESULTS=int(os.getenv("TOP_K_RESULTS", "5")),
-            SIMILARITY_THRESHOLD=float(os.getenv("SIMILARITY_THRESHOLD", "0.55")),
+            SIMILARITY_THRESHOLD=float(os.getenv("SIMILARITY_THRESHOLD", "0.45")),
             
             # Bot
             MAX_RESPONSE_LENGTH=int(os.getenv("MAX_RESPONSE_LENGTH", "4000")),

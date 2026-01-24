@@ -34,14 +34,14 @@ def main():
         logger.info("Please create a 'docs/' folder and add your API documentation")
         sys.exit(1)
     
-    # Check if docs directory has files
-    doc_files = list(docs_dir.glob("*.md")) + list(docs_dir.glob("*.txt")) + list(docs_dir.glob("*.rst"))
+    # Check if docs directory has files (rglob to include subdirs: training_materials, legacy, etc.)
+    doc_files = list(docs_dir.rglob("*.md")) + list(docs_dir.rglob("*.txt")) + list(docs_dir.rglob("*.rst"))
     if not doc_files:
         logger.error(f"No documentation files found in {docs_dir}")
-        logger.info("Add .md, .txt, or .rst files to the docs/ directory")
+        logger.info("Add .md, .txt, or .rst files to the docs/ directory (or docs/training_materials/)")
         sys.exit(1)
     
-    logger.info(f"Found {len(doc_files)} documentation files")
+    logger.info(f"Found {len(doc_files)} documentation files (including subdirs)")
     
     # Check current document count
     current_count = pipeline.vector_store.get_count()

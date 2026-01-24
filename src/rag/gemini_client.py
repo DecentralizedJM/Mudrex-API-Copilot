@@ -133,7 +133,7 @@ class GeminiClient:
         # STRONG keywords (sufficient alone when msg length > 5)
         strong_keywords = [
             'mudrex', 'fapi', 'api', 'endpoint', 'webhook', 'websocket', 'mcp',
-            'x-authentication', 'auth', 'token', 'secret', 'jwt',
+            'x-authentication', 'auth', 'token', 'secret', 'jwt', 'key',  # key = API key in this context
             'btc', 'eth', 'usdt', 'futures', 'perpetual',
             'rest', 'trade.mudrex.com', 'fapi/v1', 'http', 'https'
         ]
@@ -205,7 +205,7 @@ class GeminiClient:
             
         except Exception as e:
             logger.error(f"Error generating response: {e}", exc_info=True)
-            return "Hit a snag there. What's your API question? I'll give it another shot."
+            return "Hit a snag on my side (could be temporary). Try again in a moment—if it keeps happening, an admin can check the bot logs."
 
     def generate_response_with_grounding(
         self,
@@ -240,7 +240,7 @@ class GeminiClient:
             return answer
         except Exception as e:
             logger.error(f"Error in grounded response: {e}", exc_info=True)
-            return "Hit a snag with the search. What's your API question? I'll try again."
+            return "Hit a snag on my side (could be temporary). Try again in a moment—if it keeps happening, an admin can check the bot logs."
     
     def _build_prompt(
         self,

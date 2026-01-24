@@ -275,6 +275,51 @@ Be the expert. If it's a documentation gap -> escalate politely ("I don't have t
         
         return text.strip()
     
+    def parse_learning_instruction(self, text: str) -> Dict[str, Any]:
+        """
+        Analyze text to see if it's a teaching instruction.
+        Returns:
+            {
+                'action': 'LEARN' | 'SET_FACT' | 'NONE',
+                'content': str,
+                'key': str (optional),
+                'value': str (optional)
+            }
+        """
+        prompt = f"""
+        Analyze this admin message for teaching intent.
+        
+        Message: "{text}"
+        
+        Identify if the admin wants to:
+        1. SET_FACT: Define a strict rule/constant (e.g., "Latency is 200ms", "Rate limit is 5").
+        2. LEARN: Add general knowledge/context (e.g., "The new endpoint handles order processing like this...").
+        3. NONE: Just a regular chat or question.
+        
+        Return JSON ONLY:
+        {{
+            "action": "SET_FACT" | "LEARN" | "NONE",
+            "key": "KEY_NAME" (For SET_FACT, e.g. LATENCY),
+            "value": "Value" (For SET_FACT),
+            "content": "Cleaned text to learn" (For LEARN)
+        }}
+        """
+        
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.0
+                )
+            )
+            import json
+            return json.loads(response.text)
+        except Exception as e:
+            logger.error(f"Error parsing intent: {e}")
+            return {"action": "NONE"}
+
     def get_brief_response(self, message_type: str) -> str:
         """Get a brief response for greetings/acknowledgments"""
         import random

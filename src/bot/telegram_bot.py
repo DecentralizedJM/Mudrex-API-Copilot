@@ -393,6 +393,25 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         # Check if message is API-related
         is_api_related = self.rag_pipeline.gemini_client.is_api_related_query(message)
         
+        # ----------------- TEACHER MODE (ADMINS) -----------------
+        if self._is_admin(user_id):
+            # Analyze intent (Parallel to API check to enable natural teaching)
+            intent = self.rag_pipeline.gemini_client.parse_learning_instruction(message)
+            
+            if intent.get('action') == 'SET_FACT':
+                key = intent.get('key')
+                value = intent.get('value')
+                self.rag_pipeline.set_fact(key, value)
+                await update.message.reply_text(f"✅ **Teacher Mode**: I've memorized that **{key}** is `{value}`.", parse_mode=ParseMode.MARKDOWN)
+                return
+            
+            elif intent.get('action') == 'LEARN':
+                content = intent.get('content')
+                self.rag_pipeline.learn_text(content)
+                await update.message.reply_text(f"✅ **Teacher Mode**: I've learned this new information:\n_{content[:100]}..._", parse_mode=ParseMode.MARKDOWN)
+                return
+        # ---------------------------------------------------------
+        
         # Respond if:
         # 1. Bot is mentioned/tagged (always respond)
         # 2. Message is clearly API-related (smart detection)

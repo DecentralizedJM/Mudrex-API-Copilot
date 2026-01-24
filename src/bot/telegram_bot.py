@@ -25,6 +25,7 @@ from telegram.constants import ParseMode, ChatAction, ChatType
 from ..config import config
 from ..rag import RAGPipeline
 from ..mcp import MudrexMCPClient, MudrexTools
+from ..tasks.futures_listing_watcher import _extract_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,8 @@ class MudrexBot:
         self.app.add_handler(CommandHandler("stats", self.cmd_stats, filters.ChatType.GROUPS))
         self.app.add_handler(CommandHandler("tools", self.cmd_tools, filters.ChatType.GROUPS))
         self.app.add_handler(CommandHandler("mcp", self.cmd_mcp, filters.ChatType.GROUPS))
-        self.app.add_handler(CommandHandler("futures", self.cmd_futures, filters.ChatType.GROUPS))
+        self.app.add_handler(CommandHandler("listfutures", self.cmd_listfutures, filters.ChatType.GROUPS))
+        self.app.add_handler(CommandHandler("endpoints", self.cmd_endpoints, filters.ChatType.GROUPS))
         
         # Admin Commands (Work in Groups & DM for admins ideally, but keeping group-only filter for consistency unless DM needed)
         # Actually, let's allow admins to teach in DMs too! 
@@ -215,9 +217,10 @@ class MudrexBot:
         """Set up bot commands menu"""
         commands = [
             BotCommand("help", "Show help"),
-            BotCommand("tools", "Available API tools"),
+            BotCommand("tools", "MCP server tools list"),
             BotCommand("mcp", "MCP setup guide"),
-            BotCommand("futures", "List futures contracts"),
+            BotCommand("listfutures", "List futures (count)"),
+            BotCommand("endpoints", "API endpoints (names only)"),
             BotCommand("stats", "Bot statistics"),
         ]
         await self.app.bot.set_my_commands(commands)
@@ -240,9 +243,10 @@ Ask your API question or tag me with @. I use the MCP server whenever your quest
 
 *Commands:*
 /help - Full help
-/tools - MCP tools
+/tools - MCP server tools list
 /mcp - MCP setup
-/futures - List futures (MCP)
+/listfutures - List futures (count)
+/endpoints - API endpoints (names only)
 
 I'm your co-pilot for the Mudrex API. 🚀"""
         
@@ -267,9 +271,10 @@ I'm an **AI co-pilot**: I use the **MCP server** whenever your question needs li
 "How do I authenticate?" / "Error -1121?" → I use docs
 
 *Commands:*
-/tools - MCP tools
+/tools - MCP server tools list
 /mcp - MCP setup
-/futures - List futures (MCP)
+/listfutures - List futures (count)
+/endpoints - API endpoints (names only)
 /stats - Bot info
 
 *MCP:* docs.trade.mudrex.com/docs/mcp
@@ -279,7 +284,11 @@ For *personal* account data (positions, orders, balance), use Claude Desktop wit
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
     
     async def cmd_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /stats command"""
+        """Handle /stats command — admin only"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            await update.message.reply_text(f"🚫 Admin only. Your ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
+            return
         stats = self.rag_pipeline.get_stats()
         
         mcp_status = "Connected" if self.mcp_client and self.mcp_client.is_connected() else "Not connected"
@@ -299,17 +308,9 @@ _AI co-pilot for the Mudrex API_"""
         await update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
     
     async def cmd_tools(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /tools command"""
-        tools_text = """*Mudrex API — MCP tools (AI co-pilot)*
-
-*I call these via MCP when you ask:*
-- `list_futures` — e.g. "list futures", "available contracts"
-- `get_future` — e.g. "BTC contract details", "get future ETH"
-
-For *personal* account data (positions, orders, balance), use Claude Desktop with MCP and your own API key.
-
-/mcp — MCP setup"""
-        
+        """Handle /tools command — MCP server tools list"""
+        tools_text = MudrexTools.get_tools_summary()
+        tools_text += "\n\n_For personal account data, use Claude Desktop with MCP._\n/mcp — MCP setup"
         await update.message.reply_text(tools_text, parse_mode=ParseMode.MARKDOWN)
     
     async def cmd_mcp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -342,8 +343,8 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         
         await update.message.reply_text(mcp_text, parse_mode=ParseMode.MARKDOWN)
     
-    async def cmd_futures(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /futures command - list public futures contracts"""
+    async def cmd_listfutures(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /listfutures command — list public futures count"""
         await update.message.chat.send_action(ChatAction.TYPING)
         
         if not self.mcp_client:
@@ -356,15 +357,13 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
             )
             return
         
-        # Only public/general data - no authentication needed
         result = await self.mcp_client.call_tool('list_futures')
         
         if result.get('success'):
-            data = result.get('data', {})
-            text = str(data)[:3500]
+            n = len(_extract_symbols(result.get('data')))
             await update.message.reply_text(
-                f"*Available Futures Contracts*\n\n```\n{text}\n```\n\n"
-                "_Note: This is general information. For personal account data, use Claude Desktop with MCP._",
+                f"There are **{n}** futures pairs listed. To see the full list, use the `list_futures` MCP tool "
+                "or the futures API at docs.trade.mudrex.com.",
                 parse_mode=ParseMode.MARKDOWN
             )
         else:
@@ -372,6 +371,41 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
                 f"Couldn't fetch contracts list. {result.get('message', 'Unknown error')}\n\n"
                 "This is a community bot for general API help."
             )
+
+    # Static list of Mudrex API endpoint names (no pathways)
+    _API_ENDPOINT_NAMES = [
+        "Get spot funds",
+        "Transfer funds (spot ↔ futures)",
+        "Get futures funds",
+        "Get asset listing",
+        "Get asset by id",
+        "Get leverage",
+        "Set leverage",
+        "Place order",
+        "Get open orders",
+        "Get order by id",
+        "Amend order",
+        "Cancel order",
+        "Get order history",
+        "Get open positions",
+        "Get liquidation price",
+        "Add margin",
+        "Place risk order",
+        "Amend risk order",
+        "Reverse position",
+        "Partial close position",
+        "Close position",
+        "Get position history",
+        "Get fee history",
+    ]
+
+    async def cmd_endpoints(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /endpoints command — API endpoint names only, no pathways"""
+        lines = ["*Mudrex API — Endpoints (names only)*\n"]
+        for name in self._API_ENDPOINT_NAMES:
+            lines.append(f"• {name}")
+        lines.append("\n_For paths and usage: docs.trade.mudrex.com_")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
     
     # ==================== Admin Commands (Teacher Mode) ====================
     
@@ -564,6 +598,15 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
                     tool_name, params = mcp_info
                     res = await self.mcp_client.call_tool(tool_name, params)
                     if res.get("success") and res.get("data"):
+                        # list_futures: reply with count only, no full dump or LLM
+                        if tool_name == "list_futures":
+                            n = len(_extract_symbols(res.get("data")))
+                            await update.message.reply_text(
+                                f"There are **{n}** futures pairs listed. To see the full list, use the `list_futures` MCP tool "
+                                "or the futures API at docs.trade.mudrex.com.",
+                                parse_mode=ParseMode.MARKDOWN
+                            )
+                            return
                         mcp_context = self._format_mcp_for_context(res)
                         logger.info(f"MCP co-pilot: {tool_name} -> {len(mcp_context or '')} chars")
             

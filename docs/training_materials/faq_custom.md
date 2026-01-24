@@ -63,9 +63,7 @@ A: Your local state differs from the exchange. Fetch the latest position/order d
 A: Not yet. Only REST endpoints are currently available.
 
 **Q: What headers are required for authentication?**
-A: 
-- `X-Authentication`: your API secret
-- `X-Time`: Unix epoch timestamp in milliseconds
+A: Only `X-Authentication` with your API secret. Mudrex does not use HMAC, SHA256, signature, X-MUDREX-API-KEY, X-MUDREX-SIGNATURE, X-MUDREX-TIMESTAMP, or X-Time. For POST/PATCH/DELETE add `Content-Type: application/json`.
 
 **Q: Are numeric values integers or strings?**
 A: All numeric values are returned as strings to preserve precision (for example, "0.001").

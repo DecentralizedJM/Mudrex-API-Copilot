@@ -35,6 +35,18 @@ async def _run_daily_docs_and_changelog(bot, rag_pipeline, docs_dir: Path):
             elif changed and (not config.ALLOWED_CHAT_IDS or len(config.ALLOWED_CHAT_IDS) == 0):
                 logger.info("Changelog changed but ALLOWED_CHAT_IDS not set; skipping broadcast")
 
+            # 1b) Futures listing watcher: list_futures via MCP, diff vs snapshot, broadcast if changed
+            mcp_client = getattr(bot, "mcp_client", None)
+            if getattr(config, "ENABLE_FUTURES_LISTING_WATCHER", True) and mcp_client:
+                from .futures_listing_watcher import run as futures_listing_run
+                fl_changed, fl_summary = await futures_listing_run(mcp_client)
+                if fl_changed and fl_summary and config.ALLOWED_CHAT_IDS:
+                    for cid in config.ALLOWED_CHAT_IDS:
+                        try:
+                            await bot.app.bot.send_message(chat_id=cid, text=fl_summary)
+                        except Exception as e:
+                            logger.warning(f"Futures listing broadcast to {cid} failed: {e}")
+
             # 2) Scrape docs (sync)
             from scripts import scrape_api_docs
             await asyncio.to_thread(scrape_api_docs.scrape_docs)

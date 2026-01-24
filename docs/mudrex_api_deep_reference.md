@@ -13,19 +13,12 @@ Verify your identity
 : Complete KYC verification (PAN & Aadhaar) and enable two-factor authentication for your Mudrex account.
 Generate an API key
 : In your dashboard, create an API key. Copy the secret and store it securely, as it will not be displayed again.
-All endpoints under
-/fapi/v1
-require the following headers:
-Header
-Value
-Required
-X-Authentication
-your_api_secret
-Yes
-Content-Type
-application/json
-Only for POST/PATCH/DELETE requests
-Example Request
+All endpoints under /fapi/v1 require: X-Authentication (your API secret). Mudrex uses ONLY this — no HMAC, no SHA256, no X-MUDREX-API-KEY, no X-MUDREX-SIGNATURE, no X-MUDREX-TIMESTAMP. Content-Type: application/json only for POST/PATCH/DELETE. Base URL: https://trade.mudrex.com/fapi/v1
+
+Header: X-Authentication, Value: your_api_secret, Required: Yes.
+Content-Type: application/json — only for POST/PATCH/DELETE.
+
+Example Request (POST order)
 Shell
 curl -X POST https://trade.mudrex.com/fapi/v1/futures/<asset_id>/order \
   -H "Content-Type: application/json" \
@@ -128,8 +121,7 @@ Funds (spot)
 Retrieve your current Spot wallet balances across all supported assets.
 Request
 API
-curl -X POST "https://trade.mudrex.com/fapi/v1/wallet/funds" \
-  -H "Content-Type: application/json" \
+curl -X GET "https://trade.mudrex.com/fapi/v1/wallet/funds" \
   -H "X-Authentication: your-secret-key"
 Response
 JSON

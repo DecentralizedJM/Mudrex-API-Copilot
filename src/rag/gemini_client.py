@@ -24,10 +24,11 @@ class GeminiClient:
     Uses google-genai package with genai.Client()
     """
     
-    # Bot personality - System Admin, expert in API, REST, WebSocket, Webhook
-    SYSTEM_INSTRUCTION = """You are **MudrexBot** — a skilled **System Admin** and expert in API, REST, WebSocket, and Webhook systems for the Mudrex API group.
+    # Bot personality - AI co-pilot, System Admin, expert in API, REST, WebSocket, Webhook
+    SYSTEM_INSTRUCTION = """You are **MudrexBot** — an **AI co-pilot** for the Mudrex API: a skilled System Admin and expert in API, REST, WebSocket, and Webhook systems.
 
 ## ROLE
+- **AI co-pilot**: Use **live data from MCP** whenever it is provided in the prompt (section "Live data (MCP)"). Prefer that over static docs when both exist. If MCP data is present, cite it and base your answer on it.
 - Expert in API design, REST, WebSocket, Webhook. You know what Mudrex offers and what it does **not**.
 - Polite, professional, no chitter-chatter. Helpful and concise; human, not robotic.
 
@@ -43,6 +44,13 @@ class GeminiClient:
 - **If known (in context)**: Answer directly with facts and code when useful.
 - **If inferred**: Say "Based on similar endpoints..." and note it's an estimate.
 - **If unknown (Mudrex-specific, not in docs)**: "This isn't in my docs. [Brief restatement or best guess if any.] Correct me if I'm wrong — @DecentralizedJM, can you help?"
+
+## MUDREX AUTH (STRICT — NEVER USE ANYTHING ELSE)
+- **Only** the header: `X-Authentication: <your_api_secret>`.
+- **Base URL**: `https://trade.mudrex.com/fapi/v1`.
+- **No** HMAC, **no** SHA256, **no** signature, **no** `X-MUDREX-API-KEY`, **no** `X-MUDREX-SIGNATURE`, **no** `X-MUDREX-TIMESTAMP`. Mudrex does **not** use any of these.
+- **Content-Type: application/json** only for POST/PATCH/DELETE; for GET it is optional.
+- In code examples, use only `requests.get(url, headers={"X-Authentication": "your_secret"})` or equivalent. Never add hmac, hashlib, or signature logic.
 
 ## KNOWLEDGE BASE (Errors & Limits)
 - **Rate limits**: 2 requests/second.
@@ -161,6 +169,7 @@ class GeminiClient:
         query: str,
         context_documents: List[Dict[str, Any]],
         chat_history: Optional[List[Dict[str, str]]] = None,
+        mcp_context: Optional[str] = None,
     ) -> str:
         """
         Generate a response using the NEW Gemini SDK
@@ -174,7 +183,7 @@ class GeminiClient:
             Generated response
         """
         # Build the prompt
-        prompt = self._build_prompt(query, context_documents, chat_history)
+        prompt = self._build_prompt(query, context_documents, chat_history, mcp_context)
         
         try:
             # Use the new SDK format
@@ -212,12 +221,13 @@ class GeminiClient:
         query: str,
         context_documents: List[Dict[str, Any]],
         chat_history: Optional[List[Dict[str, str]]] = None,
+        mcp_context: Optional[str] = None,
     ) -> str:
         """
         Generate a response using Gemini with Google Search grounding.
         Used when RAG has no docs but the query is API-related (out-of-context).
         """
-        prompt = self._build_prompt(query, context_documents, chat_history)
+        prompt = self._build_prompt(query, context_documents, chat_history, mcp_context)
         model = config.GEMINI_GROUNDING_MODEL
         try:
             grounding_tool = types.Tool(google_search=types.GoogleSearch())
@@ -246,10 +256,15 @@ class GeminiClient:
         self,
         query: str,
         context_documents: List[Dict[str, Any]],
-        chat_history: Optional[List[Dict[str, str]]] = None
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        mcp_context: Optional[str] = None,
     ) -> str:
         """Build the complete prompt"""
         parts = []
+        
+        # Live data from MCP (use whenever provided — AI co-pilot)
+        if mcp_context:
+            parts.append(f"## Live data (MCP)\n{mcp_context}\n")
         
         # Add context from RAG
         if context_documents:

@@ -7,7 +7,8 @@ Copyright (c) 2025 DecentralizedJM (https://github.com/DecentralizedJM)
 Licensed under MIT License
 """
 import logging
-from typing import Optional, Dict
+import re
+from typing import Optional, Dict, Tuple
 from collections import defaultdict
 import time
 
@@ -53,9 +54,8 @@ class RateLimiter:
 
 class MudrexBot:
     """
-    Telegram bot for Mudrex API community group
-    GROUP-ONLY: Only responds in groups when mentioned/tagged
-    Focus: API questions, coding help, error debugging, feedback
+    AI co-pilot for the Mudrex API community. Uses MCP whenever needed for live data.
+    GROUP-ONLY: Responds in groups when mentioned or when the message is API-related.
     """
     
     def __init__(self, rag_pipeline: RAGPipeline, mcp_client: Optional[MudrexMCPClient] = None):
@@ -69,7 +69,7 @@ class MudrexBot:
         self.app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
         self._register_handlers()
         
-        logger.info("MudrexBot initialized (GROUP-ONLY mode)")
+        logger.info("MudrexBot initialized (AI co-pilot, GROUP-ONLY)")
     
     def _register_handlers(self):
         """Register command and message handlers"""
@@ -158,13 +158,14 @@ class MudrexBot:
         # 2. NON-ADMIN LOGIC (Reject)
         if update.message:
             await update.message.reply_text(
-                "👋 Hi! I'm a community bot for the Mudrex API traders group.\n\n"
+                "👋 Hi! I'm the **AI co-pilot** for the Mudrex API group.\n\n"
                 "I only work in groups where API traders discuss:\n"
                 "• API integration questions\n"
                 "• Coding help and debugging\n"
                 "• Error troubleshooting\n"
                 "• Feedback and suggestions\n\n"
-                "Join the group and tag me with @ to ask questions!"
+                "Join the group and tag me with @ to ask questions!",
+                parse_mode=ParseMode.MARKDOWN
             )
     
     async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -225,63 +226,55 @@ class MudrexBot:
     
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
-        welcome = """Hey! I'm the Mudrex API community assistant.
+        welcome = """Hey! I'm **MudrexBot** — your **AI co-pilot** for the Mudrex API.
 
 *I help with:*
-- API integration questions
+- API integration, auth, endpoints
 - Code debugging and fixes
 - Error troubleshooting
+- **Live data via MCP** (futures list, contract details) when you ask
 - MCP server setup
-- General API feedback
 
 *How to use:*
-Just ask your API question! I'll automatically detect and respond.
-Or tag me with @ to get my attention.
+Ask your API question or tag me with @. I use the MCP server whenever your question needs live data (e.g. "list futures", "BTC contract details").
 
 *Commands:*
 /help - Full help
-/tools - MCP tools list
-/mcp - MCP setup guide
+/tools - MCP tools
+/mcp - MCP setup
+/futures - List futures (MCP)
 
-I'm here to help the community! 🚀"""
+I'm your co-pilot for the Mudrex API. 🚀"""
         
         await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
     
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
-        help_text = """*Mudrex API Community Bot Help*
+        help_text = """*Mudrex API — AI co-pilot help*
 
-*How to use:*
-Just ask your API question! I'll respond if it's API-related.
-Or tag me with @botname to get my attention.
+*What I do:*
+I'm an **AI co-pilot**: I use the **MCP server** whenever your question needs live data (e.g. list futures, contract details for BTC/ETH). I also use docs and RAG for how‑tos and errors.
 
 *I help with:*
-- API authentication and headers
-- API endpoints and usage
-- Code examples (Python/JS)
+- API auth (X-Authentication only, no HMAC)
+- Endpoints, code examples (Python/JS)
 - Error debugging
-- MCP server setup
-- General API questions
+- **Live futures/contract data** via MCP when you ask
 
 *Example questions:*
-"How do I authenticate API requests?"
-"Why am I getting error -1121?"
-"Show me how to place a limit order"
-"Help debug this code: ```python...```"
-"How to set up MCP with Claude?"
-
-*Note:* This is a generic community bot for API documentation and general help.
-For personal account data (positions, orders, balance), use Claude Desktop with MCP.
+"List available futures" → I call MCP
+"Get BTC contract details" → I call MCP
+"How do I authenticate?" / "Error -1121?" → I use docs
 
 *Commands:*
-/tools - List API tools
-/mcp - MCP setup guide
-/futures - List futures contracts
+/tools - MCP tools
+/mcp - MCP setup
+/futures - List futures (MCP)
 /stats - Bot info
 
-*MCP Docs:* docs.trade.mudrex.com/docs/mcp
+*MCP:* docs.trade.mudrex.com/docs/mcp
 
-I automatically detect API questions - no need to tag me!"""
+For *personal* account data (positions, orders, balance), use Claude Desktop with MCP and your own API key."""
         
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
     
@@ -293,30 +286,29 @@ I automatically detect API questions - no need to tag me!"""
         
         auth_status = "Service Account" if self.mcp_client and self.mcp_client.is_authenticated() else "Not configured"
         
-        stats_text = f"""*Bot Stats*
+        stats_text = f"""*Bot Stats (AI co-pilot)*
 
 Model: {stats['model']}
 Docs: {stats['total_documents']} chunks
-MCP: {mcp_status}
+MCP: {mcp_status} (used when you ask for futures/contracts)
 Auth: {auth_status}
-Mode: Group-only (Community Bot)
+Mode: Group-only
 
-_Helping the Mudrex API community_"""
+_AI co-pilot for the Mudrex API_"""
         
         await update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
     
     async def cmd_tools(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /tools command"""
-        tools_text = """*Mudrex API Tools*
+        tools_text = """*Mudrex API — MCP tools (AI co-pilot)*
 
-*Public/General Tools:*
-- `list_futures` - List all available futures contracts
-- `get_future` - Get contract details by symbol
+*I call these via MCP when you ask:*
+- `list_futures` — e.g. "list futures", "available contracts"
+- `get_future` — e.g. "BTC contract details", "get future ETH"
 
-*Note:* This bot uses a service account for public data only.
-For personal account data (positions, orders, balance), use Claude Desktop with MCP (your own API key) or the Mudrex web interface.
+For *personal* account data (positions, orders, balance), use Claude Desktop with MCP and your own API key.
 
-Use /mcp for MCP setup instructions!"""
+/mcp — MCP setup"""
         
         await update.message.reply_text(tools_text, parse_mode=ParseMode.MARKDOWN)
     
@@ -454,6 +446,50 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         else:
             await update.message.reply_text(f"⚠️ Fact **{key}** not found.", parse_mode=ParseMode.MARKDOWN)
 
+    # ==================== MCP (AI co-pilot: use whenever needed) ====================
+    
+    def _resolve_mcp_call(self, message: str) -> Optional[Tuple[str, dict]]:
+        """If the message should be answered with MCP, return (tool_name, params). Else None."""
+        low = message.lower().strip()
+        # list_futures: list/available/show futures or contracts
+        if re.search(r'\b(list|show|available|all|what)\s+(futures|contracts?)\b', low):
+            return ("list_futures", {})
+        if re.search(r'\b(futures|contracts?)\s+(list|available)\b', low):
+            return ("list_futures", {})
+        # get_future: contract details for a symbol
+        sym_map = {"btc": "BTCUSDT", "eth": "ETHUSDT", "xrp": "XRPUSDT", "sol": "SOLUSDT", "bnb": "BNBUSDT", "doge": "DOGEUSDT"}
+        m = re.search(r'\b(btc|eth|xrp|sol|bnb|doge|ada|avax|link|dot|matic)\b', low)
+        if m:
+            base = m.group(1).upper()
+            sym = sym_map.get(m.group(1).lower(), base + "USDT")
+            if re.search(r'\b(get|detail|info|spec|future|contract)\b', low):
+                return ("get_future", {"symbol": sym})
+        # Explicit symbol: BTC/USDT or similar
+        m = re.search(r'\b([A-Z]{2,6})/?(?:USDT)?\b', message, re.I)
+        if m and re.search(r'\b(get|detail|info|spec|future|contract)\b', low):
+            s = m.group(1).upper().replace("/", "")
+            if not s.endswith("USDT"):
+                s = s + "USDT"
+            return ("get_future", {"symbol": s})
+        return None
+
+    def _format_mcp_for_context(self, result: dict) -> str:
+        """Format MCP call result for the LLM context. Truncate if large."""
+        if not result.get("success"):
+            return ""
+        data = result.get("data")
+        if not data:
+            return ""
+        # MCP often returns { "content": [ {"type":"text", "text": "..."} ] }
+        if isinstance(data, dict) and "content" in data:
+            parts = [c.get("text", "") for c in data["content"] if isinstance(c, dict) and c.get("type") == "text"]
+            raw = "\n".join(parts) if parts else str(data)
+        elif isinstance(data, str):
+            raw = data
+        else:
+            raw = str(data)
+        return (raw[:3200] + "\n... (truncated)") if len(raw) > 3200 else raw
+
     # ==================== Message Handler ====================
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -517,12 +553,21 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         await update.message.chat.send_action(ChatAction.TYPING)
         
         try:
-            # Get chat history (per group)
             history_key = f"history_{chat_id}"
             chat_history = context.chat_data.get(history_key, [])
             
-            # Query RAG pipeline
-            result = self.rag_pipeline.query(message, chat_history=chat_history)
+            # AI co-pilot: use MCP whenever the query needs live data
+            mcp_context = None
+            if self.mcp_client and self.mcp_client.is_authenticated():
+                mcp_info = self._resolve_mcp_call(message)
+                if mcp_info:
+                    tool_name, params = mcp_info
+                    res = await self.mcp_client.call_tool(tool_name, params)
+                    if res.get("success") and res.get("data"):
+                        mcp_context = self._format_mcp_for_context(res)
+                        logger.info(f"MCP co-pilot: {tool_name} -> {len(mcp_context or '')} chars")
+            
+            result = self.rag_pipeline.query(message, chat_history=chat_history, mcp_context=mcp_context)
             
             # Update history
             chat_history.append({'role': 'user', 'content': message})

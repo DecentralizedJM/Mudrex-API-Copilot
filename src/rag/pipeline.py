@@ -58,15 +58,18 @@ class RAGPipeline:
         self,
         question: str,
         chat_history: Optional[List[Dict[str, str]]] = None,
-        top_k: int = None
+        top_k: int = None,
+        mcp_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Process a query through the RAG pipeline
+        Process a query through the RAG pipeline.
+        When mcp_context is provided (live MCP data), it is passed to the model as co-pilot context.
         
         Args:
             question: User question
             chat_history: Optional conversation history
             top_k: Number of documents to retrieve
+            mcp_context: Optional live data from MCP (list_futures, get_future, etc.)
             
         Returns:
             Dict with 'answer', 'sources', and 'is_relevant'
@@ -107,7 +110,7 @@ class RAGPipeline:
             # API-related but RAG empty: use Google Search grounding
             logger.info("No RAG docs; using Google Search grounding for API-related query")
             answer = self.gemini_client.generate_response_with_grounding(
-                question, [], chat_history
+                question, [], chat_history, mcp_context
             )
             return {
                 'answer': answer,
@@ -115,11 +118,12 @@ class RAGPipeline:
                 'is_relevant': True
             }
         
-        # Generate response
+        # Generate response (with optional MCP live data for co-pilot)
         answer = self.gemini_client.generate_response(
             question,
             retrieved_docs,
-            chat_history
+            chat_history,
+            mcp_context,
         )
         
         # Extract sources

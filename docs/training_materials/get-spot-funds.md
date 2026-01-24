@@ -8,9 +8,21 @@ Request
 
 API
 
-curl -X POST "https://trade.mudrex.com/fapi/v1/wallet/funds" \
-  -H "Content-Type: application/json" \
+GET /fapi/v1/wallet/funds — auth: X-Authentication only (no HMAC, no signature).
+
+curl -X GET "https://trade.mudrex.com/fapi/v1/wallet/funds" \
   -H "X-Authentication: your-secret-key"
+
+Python (only X-Authentication; no HMAC, no signature):
+
+```python
+import requests
+r = requests.get(
+    "https://trade.mudrex.com/fapi/v1/wallet/funds",
+    headers={"X-Authentication": "your_api_secret"}
+)
+print(r.json())
+```
 
 Response
 

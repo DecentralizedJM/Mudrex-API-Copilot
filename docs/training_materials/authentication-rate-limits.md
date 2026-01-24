@@ -16,31 +16,15 @@ Generate an API key
 
 : In your dashboard, create an API key. Copy the secret and store it securely, as it will not be displayed again.
 
-All endpoints under
+All endpoints under /fapi/v1 require the following headers:
+- **X-Authentication**: your_api_secret (required). Mudrex uses ONLY this header — no HMAC, no SHA256, no X-MUDREX-API-KEY, no X-MUDREX-SIGNATURE, no X-MUDREX-TIMESTAMP.
+- **Content-Type: application/json** — only for POST/PATCH/DELETE.
 
-/fapi/v1
+Base URL: https://trade.mudrex.com/fapi/v1
 
-require the following headers:
+Example (GET, e.g. spot funds): `requests.get("https://trade.mudrex.com/fapi/v1/wallet/funds", headers={"X-Authentication": "your_secret"})`
 
-Header
-
-Value
-
-Required
-
-X-Authentication
-
-your_api_secret
-
-Yes
-
-Content-Type
-
-application/json
-
-Only for POST/PATCH/DELETE requests
-
-Example Request
+Example Request (POST order)
 
 Shell
 

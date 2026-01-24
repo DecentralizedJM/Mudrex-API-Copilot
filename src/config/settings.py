@@ -65,6 +65,9 @@ class Config:
     ENABLE_CHANGELOG_WATCHER: bool = True
     CHANGELOG_CRON_HOUR: int = 2  # 2 AM UTC
     CHANGELOG_CRON_MINUTE: int = 0
+
+    # Futures listing watcher (MCP list_futures, diff vs snapshot, broadcast newly listed/delisted to ALLOWED_CHAT_IDS)
+    ENABLE_FUTURES_LISTING_WATCHER: bool = True
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -127,6 +130,7 @@ class Config:
             ENABLE_CHANGELOG_WATCHER=os.getenv("ENABLE_CHANGELOG_WATCHER", "true").lower() == "true",
             CHANGELOG_CRON_HOUR=int(os.getenv("CHANGELOG_CRON_HOUR", "2")),
             CHANGELOG_CRON_MINUTE=int(os.getenv("CHANGELOG_CRON_MINUTE", "0")),
+            ENABLE_FUTURES_LISTING_WATCHER=os.getenv("ENABLE_FUTURES_LISTING_WATCHER", "true").lower() == "true",
         )
     
     def validate(self) -> List[str]:

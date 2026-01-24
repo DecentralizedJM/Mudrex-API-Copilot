@@ -28,28 +28,21 @@ X-Authentication: your_api_secret_here
 - Don't commit keys to version control
 
 ## Example Request (Python)
+Mudrex uses only X-Authentication (no HMAC, no signature, no X-MUDREX-* headers).
 ```python
 import requests
 
-headers = {
-    'X-Authentication': 'your_api_secret',
-    'Content-Type': 'application/json'
-}
-
 response = requests.get(
-    'https://api.mudrex.com/api/v1/account/balance',
-    headers=headers
+    "https://trade.mudrex.com/fapi/v1/wallet/funds",
+    headers={"X-Authentication": "your_api_secret"}
 )
 print(response.json())
 ```
 
 ## Example Request (JavaScript)
 ```javascript
-const response = await fetch('https://api.mudrex.com/api/v1/account/balance', {
-    headers: {
-        'X-Authentication': 'your_api_secret',
-        'Content-Type': 'application/json'
-    }
+const response = await fetch("https://trade.mudrex.com/fapi/v1/wallet/funds", {
+    headers: { "X-Authentication": "your_api_secret" }
 });
 const data = await response.json();
 ```

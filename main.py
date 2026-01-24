@@ -30,6 +30,9 @@ logging.basicConfig(
     ]
 )
 
+# SECURITY: Suppress verbose httpx logs to prevent token exposure
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 

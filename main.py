@@ -63,8 +63,26 @@ async def async_main():
     stats = rag_pipeline.get_stats()
     if stats['total_documents'] == 0:
         logger.warning("No documents in vector store!")
-        logger.info("Run: python scripts/ingest_docs.py")
-        logger.info("Or:  python scripts/scrape_docs.py && python scripts/ingest_docs.py")
+        logger.info("Attempting to auto-ingest documentation...")
+        
+        # Try to ingest docs automatically
+        docs_dir = Path(__file__).parent / "docs"
+        if docs_dir.exists() and any(docs_dir.glob("*.md")):
+            logger.info(f"Found docs directory with {len(list(docs_dir.glob('*.md')))} files")
+            try:
+                num_chunks = rag_pipeline.ingest_documents(str(docs_dir))
+                if num_chunks > 0:
+                    logger.info(f"✓ Successfully auto-ingested {num_chunks} chunks")
+                    stats = rag_pipeline.get_stats()
+                    logger.info(f"✓ Vector store now has {stats['total_documents']} documents")
+                else:
+                    logger.warning("Ingestion returned 0 chunks. Check docs directory.")
+            except Exception as e:
+                logger.error(f"Failed to auto-ingest docs: {e}")
+                logger.info("Run manually: python3 scripts/ingest_docs.py")
+        else:
+            logger.warning(f"Docs directory not found or empty: {docs_dir}")
+            logger.info("Run: python3 scripts/scrape_docs.py && python3 scripts/ingest_docs.py")
     else:
         logger.info(f"Loaded {stats['total_documents']} document chunks")
     

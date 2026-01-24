@@ -100,15 +100,51 @@ class MudrexBot:
         self.app.add_handler(
             MessageHandler(
                 filters.TEXT & filters.ChatType.PRIVATE,
-                self.reject_dm
+                self.handle_dm
             )
         )
         
         self.app.add_error_handler(self.error_handler)
         logger.info("Handlers registered (GROUP-ONLY)")
     
-    async def reject_dm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Reject direct messages - bot only works in groups"""
+    async def handle_dm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle Direct Messages
+        - Admins: Teacher Mode active (can teach via natural language)
+        - Users: Rejected (Bot is group-only)
+        """
+        user_id = update.effective_user.id
+        
+        # 1. ADMIN LOGIC (Teacher Mode)
+        if self._is_admin(user_id):
+            message = update.message.text
+            if not message:
+                return
+
+            await update.message.chat.send_action(ChatAction.TYPING)
+            
+            # Analyze intent for teaching
+            intent = self.rag_pipeline.gemini_client.parse_learning_instruction(message)
+            
+            if intent.get('action') == 'SET_FACT':
+                key = intent.get('key')
+                value = intent.get('value')
+                self.rag_pipeline.set_fact(key, value)
+                await update.message.reply_text(f"✅ **Teacher Mode**: I've memorized that **{key}** is `{value}`.", parse_mode=ParseMode.MARKDOWN)
+                return
+            
+            elif intent.get('action') == 'LEARN':
+                content = intent.get('content')
+                self.rag_pipeline.learn_text(content)
+                await update.message.reply_text(f"✅ **Teacher Mode**: I've learned this new information:\n_{content[:100]}..._", parse_mode=ParseMode.MARKDOWN)
+                return
+            
+            # If no teaching intent, normal RAG query (for testing)
+            result = self.rag_pipeline.query(message)
+            await self._send_response(update, result['answer'])
+            return
+
+        # 2. NON-ADMIN LOGIC (Reject)
         if update.message:
             await update.message.reply_text(
                 "👋 Hi! I'm a community bot for the Mudrex API traders group.\n\n"
@@ -393,24 +429,7 @@ MCP lets AI assistants like Claude interact with your Mudrex account.
         # Check if message is API-related
         is_api_related = self.rag_pipeline.gemini_client.is_api_related_query(message)
         
-        # ----------------- TEACHER MODE (ADMINS) -----------------
-        if self._is_admin(user_id):
-            # Analyze intent (Parallel to API check to enable natural teaching)
-            intent = self.rag_pipeline.gemini_client.parse_learning_instruction(message)
-            
-            if intent.get('action') == 'SET_FACT':
-                key = intent.get('key')
-                value = intent.get('value')
-                self.rag_pipeline.set_fact(key, value)
-                await update.message.reply_text(f"✅ **Teacher Mode**: I've memorized that **{key}** is `{value}`.", parse_mode=ParseMode.MARKDOWN)
-                return
-            
-            elif intent.get('action') == 'LEARN':
-                content = intent.get('content')
-                self.rag_pipeline.learn_text(content)
-                await update.message.reply_text(f"✅ **Teacher Mode**: I've learned this new information:\n_{content[:100]}..._", parse_mode=ParseMode.MARKDOWN)
-                return
-        # ---------------------------------------------------------
+
         
         # Respond if:
         # 1. Bot is mentioned/tagged (always respond)

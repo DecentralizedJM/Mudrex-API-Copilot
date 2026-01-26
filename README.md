@@ -1,4 +1,4 @@
-# Mudrex API Bot 🤖
+# Mudrex Co-pilot </> 
 
 A **GROUP-ONLY** generic Telegram bot for private API traders community. Helps developers with Mudrex API documentation, coding questions, error debugging, and general API help.
 

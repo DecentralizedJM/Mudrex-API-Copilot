@@ -100,15 +100,15 @@ python3 main.py
 │  (Junior Dev + Community Admin personality)             │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │         Advanced RAG Pipeline                   │  │
-│  │  1. Initial Retrieval                           │  │
-│  │  2. Iterative Retrieval (query transformation)  │  │
-│  │  3. Low-Threshold Search (context gathering)    │  │
-│  │  4. Document Relevancy Validation (Reliable)   │  │
-│  │  5. LLM-based Reranking                         │  │
-│  │  6. Context-Based Response (no Google Search)   │  │
-│  └──────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │         Advanced RAG Pipeline                    │   │
+│  │  1. Initial Retrieval                            │   │
+│  │  2. Iterative Retrieval (query transformation)   │   │
+│  │  3. Low-Threshold Search (context gathering)     │   │
+│  │  4. Document Relevancy Validation (Reliable)     │   │
+│  │  5. LLM-based Reranking                          │   │ 
+│  │  6. Context-Based Response (no Google Search)    │   │
+│  └──────────────────────────────────────────────────┘   │
 │         │                                               │
 │  ┌──────────────┐    ┌──────────────┐    ┌───────────┐  │
 │  │ Vector Store │    │  MCP Client  │    │  Gemini   │  │

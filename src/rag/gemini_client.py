@@ -309,27 +309,63 @@ Answer with ONLY a JSON object:
 Score 0.0-1.0 based on how well the document answers the question. Only return true if score >= 0.6."""
             
             try:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=validation_prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.1
-                    )
-                )
-                import json
-                result = json.loads(response.text)
+                import time
+                max_retries = 2
+                retry_delay = 1.0
                 
-                # Cache the result
-                if self.cache:
-                    self.cache.set_validation(query, doc, result)
-                
-                if result.get('relevant', False) and result.get('score', 0) >= config.RELEVANCY_THRESHOLD:
-                    doc['relevancy_score'] = result.get('score', 0)
-                    validated_docs.append(doc)
-                    logger.debug(f"Document validated: score={result.get('score', 0):.2f}")
-                else:
-                    logger.debug(f"Document filtered out: score={result.get('score', 0):.2f}")
+                for attempt in range(max_retries + 1):
+                    try:
+                        response = self.client.models.generate_content(
+                            model=self.model_name,
+                            contents=validation_prompt,
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json",
+                                temperature=0.1
+                            )
+                        )
+                        
+                        # Check if response.text is None or empty
+                        if not response.text:
+                            logger.warning(f"Empty response from Gemini (attempt {attempt + 1})")
+                            if attempt < max_retries:
+                                time.sleep(retry_delay * (attempt + 1))
+                                continue
+                            # On final attempt, include doc to be safe
+                            validated_docs.append(doc)
+                            break
+                        
+                        import json
+                        result = json.loads(response.text)
+                        
+                        # Cache the result
+                        if self.cache:
+                            self.cache.set_validation(query, doc, result)
+                        
+                        if result.get('relevant', False) and result.get('score', 0) >= config.RELEVANCY_THRESHOLD:
+                            doc['relevancy_score'] = result.get('score', 0)
+                            validated_docs.append(doc)
+                            logger.debug(f"Document validated: score={result.get('score', 0):.2f}")
+                        else:
+                            logger.debug(f"Document filtered out: score={result.get('score', 0):.2f}")
+                        break  # Success, exit retry loop
+                        
+                    except Exception as api_error:
+                        error_str = str(api_error)
+                        # Check if it's a 503 or rate limit error
+                        if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
+                            if attempt < max_retries:
+                                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                                logger.warning(f"Gemini overloaded (503), retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
+                                time.sleep(wait_time)
+                                continue
+                            else:
+                                logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, including doc to be safe")
+                                validated_docs.append(doc)
+                                break
+                        else:
+                            # Other errors - re-raise to outer except
+                            raise
+                            
             except Exception as e:
                 logger.warning(f"Error validating document relevancy: {e}")
                 # On error, include the doc to be safe (better than filtering out good docs)
@@ -395,37 +431,71 @@ Return ONLY a JSON array of document indices (0-based) sorted by relevance (most
 [0, 2, 1, ...]"""
         
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=rerank_prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1
-                )
-            )
-            import json
-            ranked_indices = json.loads(response.text)
+            import time
+            max_retries = 2
+            retry_delay = 1.0
             
-            # Cache the result
-            if self.cache:
-                self.cache.set_rerank(query, documents, ranked_indices)
-            
-            # Reorder documents based on ranking
-            ranked_docs = []
-            for idx in ranked_indices[:top_k]:
-                if 0 <= idx < len(documents):
-                    ranked_docs.append(documents[idx])
-            
-            # If ranking failed, fall back to similarity-based order
-            if not ranked_docs:
-                ranked_docs = sorted(documents, key=lambda x: x.get('similarity', 0), reverse=True)[:top_k]
-            
-            logger.info(f"Reranked {len(ranked_docs)} documents")
-            return ranked_docs
+            for attempt in range(max_retries + 1):
+                try:
+                    response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=rerank_prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.1
+                        )
+                    )
+                    
+                    # Check if response.text is None or empty
+                    if not response.text:
+                        logger.warning(f"Empty response from Gemini for reranking (attempt {attempt + 1})")
+                        if attempt < max_retries:
+                            time.sleep(retry_delay * (attempt + 1))
+                            continue
+                        # On final attempt, fall back to similarity order
+                        break
+                    
+                    import json
+                    ranked_indices = json.loads(response.text)
+                    
+                    # Cache the result
+                    if self.cache:
+                        self.cache.set_rerank(query, documents, ranked_indices)
+                    
+                    # Reorder documents based on ranking
+                    ranked_docs = []
+                    for idx in ranked_indices[:top_k]:
+                        if 0 <= idx < len(documents):
+                            ranked_docs.append(documents[idx])
+                    
+                    # If ranking failed, fall back to similarity-based order
+                    if not ranked_docs:
+                        ranked_docs = sorted(documents, key=lambda x: x.get('similarity', 0), reverse=True)[:top_k]
+                    
+                    logger.info(f"Reranked {len(ranked_docs)} documents")
+                    return ranked_docs
+                    
+                except Exception as api_error:
+                    error_str = str(api_error)
+                    # Check if it's a 503 or rate limit error
+                    if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
+                        if attempt < max_retries:
+                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                            logger.warning(f"Gemini overloaded (503) for reranking, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using similarity order")
+                            break
+                    else:
+                        # Other errors - re-raise to outer except
+                        raise
+                        
         except Exception as e:
             logger.warning(f"Error reranking documents: {e}, using similarity order")
-            # Fall back to similarity-based ranking
-            return sorted(documents, key=lambda x: x.get('similarity', 0), reverse=True)[:top_k]
+        
+        # Fall back to similarity-based ranking
+        return sorted(documents, key=lambda x: x.get('similarity', 0), reverse=True)[:top_k]
     
     def transform_query(self, query: str) -> str:
         """
@@ -459,20 +529,56 @@ Generate a better search query that:
 Return ONLY the transformed query, nothing else."""
         
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=transform_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.2
-                )
-            )
-            transformed = response.text.strip()
-            if transformed and len(transformed) > 5:
-                logger.info(f"Query transformed: '{query}' -> '{transformed}'")
-                # Cache the result
-                if self.cache:
-                    self.cache.set_transform(query, transformed)
-                return transformed
+            import time
+            max_retries = 2
+            retry_delay = 1.0
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=transform_prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.2
+                        )
+                    )
+                    
+                    # Check if response.text is None or empty
+                    if not response.text:
+                        logger.warning(f"Empty response from Gemini for query transformation (attempt {attempt + 1})")
+                        if attempt < max_retries:
+                            time.sleep(retry_delay * (attempt + 1))
+                            continue
+                        # On final attempt, fall back to original query
+                        break
+                    
+                    transformed = response.text.strip()
+                    if transformed and len(transformed) > 5:
+                        logger.info(f"Query transformed: '{query}' -> '{transformed}'")
+                        # Cache the result
+                        if self.cache:
+                            self.cache.set_transform(query, transformed)
+                        return transformed
+                    else:
+                        # Empty or too short transformation, fall back
+                        break
+                        
+                except Exception as api_error:
+                    error_str = str(api_error)
+                    # Check if it's a 503 or rate limit error
+                    if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
+                        if attempt < max_retries:
+                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                            logger.warning(f"Gemini overloaded (503) for query transform, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using original query")
+                            break
+                    else:
+                        # Other errors - re-raise to outer except
+                        raise
+                        
         except Exception as e:
             logger.warning(f"Error transforming query: {e}")
         

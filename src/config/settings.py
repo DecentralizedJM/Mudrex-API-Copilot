@@ -58,8 +58,14 @@ class Config:
     RATE_LIMIT_MESSAGES: int = 30  # Max messages per user
     RATE_LIMIT_WINDOW: int = 60  # Per minute
     
-    # Google Search Grounding (for out-of-context API questions)
+    # Google Search Grounding (DEPRECATED - no longer used)
     GEMINI_GROUNDING_MODEL: str = "gemini-2.5-flash"
+    
+    # Advanced RAG Settings
+    CONTEXT_SEARCH_THRESHOLD: float = 0.30  # Lower threshold for context gathering
+    RELEVANCY_THRESHOLD: float = 0.6  # Minimum relevancy score to use a document
+    RERANK_TOP_K: int = 5  # Top K documents after reranking
+    MAX_ITERATIVE_RETRIEVAL: int = 2  # Max iterations for iterative retrieval
     
     # Changelog watcher (daily scrape + broadcast to ALLOWED_CHAT_IDS)
     ENABLE_CHANGELOG_WATCHER: bool = True
@@ -131,6 +137,12 @@ class Config:
             CHANGELOG_CRON_HOUR=int(os.getenv("CHANGELOG_CRON_HOUR", "2")),
             CHANGELOG_CRON_MINUTE=int(os.getenv("CHANGELOG_CRON_MINUTE", "0")),
             ENABLE_FUTURES_LISTING_WATCHER=os.getenv("ENABLE_FUTURES_LISTING_WATCHER", "true").lower() == "true",
+            
+            # Advanced RAG Settings
+            CONTEXT_SEARCH_THRESHOLD=float(os.getenv("CONTEXT_SEARCH_THRESHOLD", "0.30")),
+            RELEVANCY_THRESHOLD=float(os.getenv("RELEVANCY_THRESHOLD", "0.6")),
+            RERANK_TOP_K=int(os.getenv("RERANK_TOP_K", "5")),
+            MAX_ITERATIVE_RETRIEVAL=int(os.getenv("MAX_ITERATIVE_RETRIEVAL", "2")),
         )
     
     def validate(self) -> List[str]:

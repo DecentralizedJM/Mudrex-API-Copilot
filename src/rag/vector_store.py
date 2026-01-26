@@ -189,6 +189,62 @@ class VectorStore:
         logger.info(f"Found {len(formatted_results)} relevant documents for query")
         return formatted_results
     
+    def search_all_relevant(
+        self,
+        query: str,
+        top_k: int = 10,
+        min_threshold: float = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search with lower threshold for context gathering when no high-similarity docs found.
+        Used to provide Gemini with broader context for reasoning.
+        
+        Args:
+            query: Search query text
+            top_k: Number of results to return
+            min_threshold: Minimum similarity threshold (defaults to CONTEXT_SEARCH_THRESHOLD)
+            
+        Returns:
+            List of dicts containing document, metadata, and similarity
+        """
+        if min_threshold is None:
+            min_threshold = config.CONTEXT_SEARCH_THRESHOLD
+        
+        if top_k is None:
+            top_k = 10
+        
+        if not self.documents:
+            logger.warning("No documents in vector store")
+            return []
+        
+        # Get query embedding
+        query_embedding = self._get_embedding(query)
+        query_vector = np.array(query_embedding).reshape(1, -1)
+        
+        # Calculate similarities
+        doc_vectors = np.array(self.embeddings)
+        similarities = cosine_similarity(query_vector, doc_vectors)[0]
+        
+        # Get top k indices
+        top_indices = np.argsort(similarities)[::-1][:top_k]
+        
+        # Format results with lower threshold
+        formatted_results = []
+        for idx in top_indices:
+            similarity = float(similarities[idx])
+            
+            # Filter by lower similarity threshold
+            if similarity >= min_threshold:
+                formatted_results.append({
+                    'document': self.documents[idx],
+                    'metadata': self.metadatas[idx],
+                    'similarity': similarity,
+                    'distance': 1 - similarity
+                })
+        
+        logger.info(f"Found {len(formatted_results)} documents with lower threshold ({min_threshold})")
+        return formatted_results
+    
     def clear(self) -> None:
         """Clear all documents from the collection"""
         self.documents = []

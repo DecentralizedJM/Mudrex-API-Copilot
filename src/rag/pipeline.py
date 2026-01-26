@@ -11,6 +11,7 @@ from .vector_store import VectorStore
 from .gemini_client import GeminiClient
 from .document_loader import DocumentLoader
 from .fact_store import FactStore
+from ..config import config
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class RAGPipeline:
         # NOTE: is_api_related check is now done in telegram_bot.py (handle_message)
         # Pipeline should always process what gets to it after that gatekeeper check
         
-        # 2. Retrieve relevant documents
+        # 2. Initial retrieval
         logger.info(f"Processing query: {question[:50]}...")
         retrieved_docs = self.vector_store.search(question, top_k=top_k)
         
@@ -98,41 +99,95 @@ class RAGPipeline:
                 logger.info(f"- {doc['metadata'].get('filename')}: {doc['similarity']:.4f}")
         else:
             logger.info("No docs retrieved above threshold")
-            
+        
+        # 3. If empty, try iterative retrieval with query transformation
         if not retrieved_docs:
-            # API-related but RAG empty: use Google Search grounding
-            logger.info("No RAG docs; using Google Search grounding for API-related query")
-            answer = self.gemini_client.generate_response_with_grounding(
+            logger.info("No docs found; trying iterative retrieval with query transformation")
+            retrieved_docs = self._iterative_retrieval(question, top_k=top_k)
+        
+        # 4. If still empty, use low-threshold search for context
+        if not retrieved_docs:
+            logger.info("Trying low-threshold search for context")
+            retrieved_docs = self.vector_store.search_all_relevant(question, top_k=10)
+        
+        # 5. Validate document relevancy (Reliable RAG)
+        if retrieved_docs:
+            logger.info(f"Validating relevancy of {len(retrieved_docs)} documents")
+            retrieved_docs = self.gemini_client.validate_document_relevancy(question, retrieved_docs)
+        
+        # 6. Rerank documents for better quality
+        if retrieved_docs:
+            logger.info(f"Reranking {len(retrieved_docs)} documents")
+            retrieved_docs = self.gemini_client.rerank_documents(question, retrieved_docs)
+        
+        # 7. Generate response
+        if retrieved_docs:
+            # Generate response with validated and reranked docs
+            answer = self.gemini_client.generate_response(
+                question,
+                retrieved_docs,
+                chat_history,
+                mcp_context,
+            )
+            
+            # Extract sources
+            sources = [
+                {
+                    'filename': doc['metadata'].get('filename', 'Unknown'),
+                    'similarity': doc.get('similarity', 0.0)
+                }
+                for doc in retrieved_docs[:3]  # Top 3 sources
+            ]
+        else:
+            # No docs found - use context search (no Google Search)
+            logger.info("No relevant docs found; using context search without Google Search")
+            answer = self.gemini_client.generate_response_with_context_search(
                 question, [], chat_history, mcp_context
             )
-            return {
-                'answer': answer,
-                'sources': [{'filename': 'Google Search (grounding)', 'similarity': 0.0}],
-                'is_relevant': True
-            }
-        
-        # Generate response (with optional MCP live data for co-pilot)
-        answer = self.gemini_client.generate_response(
-            question,
-            retrieved_docs,
-            chat_history,
-            mcp_context,
-        )
-        
-        # Extract sources
-        sources = [
-            {
-                'filename': doc['metadata'].get('filename', 'Unknown'),
-                'similarity': doc['similarity']
-            }
-            for doc in retrieved_docs[:3]  # Top 3 sources
-        ]
+            sources = [{'filename': 'Context Search (no docs)', 'similarity': 0.0}]
         
         return {
             'answer': answer,
             'sources': sources,
             'is_relevant': True
         }
+    
+    def _iterative_retrieval(
+        self,
+        question: str,
+        max_iterations: int = None,
+        top_k: int = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Iterative retrieval: if first search fails, transform query and try again.
+        
+        Args:
+            question: Original query
+            max_iterations: Maximum iterations (defaults to MAX_ITERATIVE_RETRIEVAL)
+            top_k: Number of documents to retrieve
+            
+        Returns:
+            List of retrieved documents, or empty list if none found
+        """
+        if max_iterations is None:
+            max_iterations = config.MAX_ITERATIVE_RETRIEVAL
+        
+        current_query = question
+        
+        for iteration in range(max_iterations):
+            if iteration > 0:
+                # Transform query for better retrieval
+                logger.info(f"Iteration {iteration + 1}: Transforming query")
+                current_query = self.gemini_client.transform_query(current_query)
+            
+            # Try search with current query
+            docs = self.vector_store.search(current_query, top_k=top_k)
+            if docs:
+                logger.info(f"Found {len(docs)} docs after {iteration + 1} iteration(s)")
+                return docs
+        
+        logger.info(f"No docs found after {max_iterations} iterations")
+        return []
     
     def get_stats(self) -> Dict[str, Any]:
         """Get pipeline statistics"""

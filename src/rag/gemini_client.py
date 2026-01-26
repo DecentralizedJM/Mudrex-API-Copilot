@@ -57,7 +57,14 @@ Never guess at Mudrex-specific details. It's better to say "I don't know" than g
 - **Rate limit**: 2 requests/second.
 
 ## PRIVACY
-This is a shared service account — public data only. No personal balances or orders."""
+This is a shared service account — public data only. No personal balances or orders.
+
+## HANDLING OUT-OF-CONTEXT QUESTIONS
+- When given low-similarity documents, search through them carefully using your reasoning
+- If the question is about a feature not in docs (e.g., TradingView integrations), use the template response
+- Template: "I don't have [feature] info in my Mudrex docs, but it's on our roadmap. Our devs are working on it — stay tuned!"
+- If truly nothing relevant: "I don't have that in my Mudrex docs. Can you share more details, or @DecentralizedJM might know?"
+- **Never use generic web knowledge or guess** - only use what's in the provided documentation."""
     
     def __init__(self):
         """Initialize Gemini client with NEW SDK"""
@@ -234,40 +241,266 @@ This is a shared service account — public data only. No personal balances or o
             logger.error(f"Error generating response: {e}", exc_info=True)
             return "Something went wrong on my end — not your code. Try again in a sec?"
 
-    def generate_response_with_grounding(
+    def validate_document_relevancy(
         self,
         query: str,
-        context_documents: List[Dict[str, Any]],
+        documents: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Validate that retrieved documents actually answer the query (Reliable RAG).
+        Uses Gemini to score relevancy and filter out irrelevant docs.
+        
+        Args:
+            query: User query
+            documents: List of retrieved documents with metadata and similarity
+            
+        Returns:
+            Filtered list of documents with relevancy >= RELEVANCY_THRESHOLD
+        """
+        if not documents:
+            return []
+        
+        # If only 1-2 docs, validate them individually
+        # If more, batch validate for efficiency
+        validated_docs = []
+        
+        for doc in documents:
+            doc_text = doc.get('document', '')[:1000]  # Limit for validation prompt
+            validation_prompt = f"""Does this document answer the user's question?
+
+User Question: {query}
+
+Document:
+{doc_text}
+
+Answer with ONLY a JSON object:
+{{"relevant": true/false, "score": 0.0-1.0, "reason": "brief explanation"}}
+
+Score 0.0-1.0 based on how well the document answers the question. Only return true if score >= 0.6."""
+            
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=validation_prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.1
+                    )
+                )
+                import json
+                result = json.loads(response.text)
+                
+                if result.get('relevant', False) and result.get('score', 0) >= config.RELEVANCY_THRESHOLD:
+                    doc['relevancy_score'] = result.get('score', 0)
+                    validated_docs.append(doc)
+                    logger.debug(f"Document validated: score={result.get('score', 0):.2f}")
+                else:
+                    logger.debug(f"Document filtered out: score={result.get('score', 0):.2f}")
+            except Exception as e:
+                logger.warning(f"Error validating document relevancy: {e}")
+                # On error, include the doc to be safe (better than filtering out good docs)
+                validated_docs.append(doc)
+        
+        logger.info(f"Validated {len(validated_docs)}/{len(documents)} documents as relevant")
+        return validated_docs
+    
+    def rerank_documents(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Rerank documents using LLM-based scoring (Reranking technique).
+        Returns top_k most relevant documents.
+        
+        Args:
+            query: User query
+            documents: List of documents to rerank
+            top_k: Number of top documents to return (defaults to RERANK_TOP_K)
+            
+        Returns:
+            Reranked list of top_k documents
+        """
+        if not documents:
+            return []
+        
+        if top_k is None:
+            top_k = config.RERANK_TOP_K
+        
+        if len(documents) <= top_k:
+            return documents
+        
+        # Create a prompt to score all documents
+        doc_list = []
+        for i, doc in enumerate(documents):
+            doc_text = doc.get('document', '')[:500]  # Limit per doc
+            doc_list.append(f"[{i}] {doc_text}")
+        
+        rerank_prompt = f"""Rank these documents by relevance to the user's question.
+
+User Question: {query}
+
+Documents:
+{chr(10).join(doc_list)}
+
+Return ONLY a JSON array of document indices (0-based) sorted by relevance (most relevant first):
+[0, 2, 1, ...]"""
+        
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=rerank_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1
+                )
+            )
+            import json
+            ranked_indices = json.loads(response.text)
+            
+            # Reorder documents based on ranking
+            ranked_docs = []
+            for idx in ranked_indices[:top_k]:
+                if 0 <= idx < len(documents):
+                    ranked_docs.append(documents[idx])
+            
+            # If ranking failed, fall back to similarity-based order
+            if not ranked_docs:
+                ranked_docs = sorted(documents, key=lambda x: x.get('similarity', 0), reverse=True)[:top_k]
+            
+            logger.info(f"Reranked {len(ranked_docs)} documents")
+            return ranked_docs
+        except Exception as e:
+            logger.warning(f"Error reranking documents: {e}, using similarity order")
+            # Fall back to similarity-based ranking
+            return sorted(documents, key=lambda x: x.get('similarity', 0), reverse=True)[:top_k]
+    
+    def transform_query(self, query: str) -> str:
+        """
+        Transform query to improve retrieval (Query Transformations technique).
+        - Step-back prompting: Generate broader query for context
+        - Query expansion: Add relevant synonyms/keywords
+        
+        Args:
+            query: Original user query
+            
+        Returns:
+            Transformed query
+        """
+        transform_prompt = f"""Transform this query to improve document retrieval for a Mudrex Futures API documentation search.
+
+Original Query: {query}
+
+Generate a better search query that:
+1. Uses broader terms if the query is too specific
+2. Adds relevant synonyms (e.g., "endpoint" -> "API endpoint", "route")
+3. Expands abbreviations (e.g., "auth" -> "authentication")
+4. Keeps the core intent but makes it more likely to match documentation
+
+Return ONLY the transformed query, nothing else."""
+        
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=transform_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2
+                )
+            )
+            transformed = response.text.strip()
+            if transformed and len(transformed) > 5:
+                logger.info(f"Query transformed: '{query}' -> '{transformed}'")
+                return transformed
+        except Exception as e:
+            logger.warning(f"Error transforming query: {e}")
+        
+        # Fall back to original query
+        return query
+    
+    def _get_missing_feature_response(self, query: str) -> Optional[str]:
+        """
+        Check if query is about a known missing feature and return template response.
+        
+        Args:
+            query: User query
+            
+        Returns:
+            Template response if it's a known missing feature, None otherwise
+        """
+        query_lower = query.lower()
+        
+        missing_features = {
+            'tradingview': "I don't have TradingView integration info in my Mudrex docs, but it's on our roadmap. Our devs are working on it — stay tuned!",
+            'trading view': "I don't have TradingView integration info in my Mudrex docs, but it's on our roadmap. Our devs are working on it — stay tuned!",
+            'webhook': "Mudrex doesn't support webhooks yet — only REST APIs. It's on our roadmap though!",
+            'websocket': "Mudrex doesn't support WebSockets — only REST APIs. Use REST polling for real-time-like data.",
+        }
+        
+        for keyword, response in missing_features.items():
+            if keyword in query_lower:
+                return response
+        
+        return None
+    
+    def generate_response_with_context_search(
+        self,
+        query: str,
+        low_similarity_docs: List[Dict[str, Any]],
         chat_history: Optional[List[Dict[str, str]]] = None,
         mcp_context: Optional[str] = None,
     ) -> str:
         """
-        Generate a response using Gemini with Google Search grounding.
-        Used when RAG has no docs but the query is API-related (out-of-context).
+        Generate response using Gemini's reasoning on all available docs.
+        No Google Search - uses Gemini's built-in knowledge + provided docs.
+        Checks for missing features template responses.
+        
+        Args:
+            query: User query
+            low_similarity_docs: Documents found with lower threshold (may be empty)
+            chat_history: Optional chat history
+            mcp_context: Optional MCP context
+            
+        Returns:
+            Generated response
         """
-        prompt = self._build_prompt(query, context_documents, chat_history, mcp_context)
-        model = config.GEMINI_GROUNDING_MODEL
+        # First check for missing features template
+        template_response = self._get_missing_feature_response(query)
+        if template_response:
+            logger.info("Using template response for missing feature")
+            return template_response
+        
+        # Build prompt with low-similarity docs (if any)
+        prompt = self._build_prompt(query, low_similarity_docs, chat_history, mcp_context)
+        
+        # Add explicit instruction for no-docs case
+        if not low_similarity_docs:
+            prompt += "\n\n## IMPORTANT: No relevant documentation found.\nYou MUST respond: 'I don't have that in my Mudrex docs. Can you share more details, or @DecentralizedJM might know?'\nDO NOT use general API knowledge or guess."
+        
         try:
-            grounding_tool = types.Tool(google_search=types.GoogleSearch())
             response = self.client.models.generate_content(
-                model=model,
+                model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=self.SYSTEM_INSTRUCTION,
                     temperature=self.temperature,
                     max_output_tokens=config.GEMINI_MAX_TOKENS,
-                    tools=[grounding_tool],
-                ),
+                )
             )
+            
             answer = response.text if response.text else ""
+            
             if not answer:
-                return "Couldn't find much on that. Can you give me more details or rephrase?"
+                return "I don't have that in my Mudrex docs. Can you share more details, or @DecentralizedJM might know?"
+            
             answer = self._clean_response(answer)
+            
             if len(answer) > config.MAX_RESPONSE_LENGTH:
-                answer = answer[: config.MAX_RESPONSE_LENGTH - 100] + "\n\n_(Cut short — ask something more specific?)_"
+                answer = answer[:config.MAX_RESPONSE_LENGTH - 100] + "\n\n_(Cut short — ask something more specific?)_"
+            
             return answer
         except Exception as e:
-            logger.error(f"Error in grounded response: {e}", exc_info=True)
+            logger.error(f"Error in context search response: {e}", exc_info=True)
             return "Something went wrong on my end — not your code. Try again in a sec?"
     
     def _build_prompt(

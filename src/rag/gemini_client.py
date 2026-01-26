@@ -775,6 +775,10 @@ Return ONLY the transformed query, nothing else."""
                 )
             )
             import json
+            # Check if response.text is None or empty
+            if not response.text:
+                logger.warning("Empty response from Gemini for intent parsing")
+                return {"action": "NONE"}
             return json.loads(response.text)
         except Exception as e:
             logger.error(f"Error parsing intent: {e}")

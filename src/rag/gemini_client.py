@@ -205,6 +205,63 @@ This is a shared service account — public data only. No personal balances or o
         if weak_count >= 2:
             return True
         return False
+
+    def classify_query_domain(self, query: str) -> str:
+        """
+        Classify query as Mudrex-specific vs generic trading/system-design.
+        
+        Returns:
+            "mudrex_specific" | "generic_trading"
+        """
+        q = query.lower()
+
+        # Anything that explicitly mentions Mudrex or its API should go through RAG
+        mudrex_markers = [
+            "mudrex",
+            "fapi",
+            "trade.mudrex.com",
+            "x-authentication",
+            "fapi/v1",
+            "mudrex api",
+            "mudrex futures",
+        ]
+        if any(marker in q for marker in mudrex_markers):
+            return "mudrex_specific"
+
+        # Generic trading / systems questions (no Mudrex mention)
+        generic_markers = [
+            "partial fill",
+            "pnl",
+            "p&l",
+            "unrealized",
+            "unrealised",
+            "kill switch",
+            "throttle",
+            "rate limit",
+            "req/sec",
+            "order size",
+            "position size",
+            "cross-margin",
+            "cross margin",
+            "isolated margin",
+            "liquidation",
+            "slippage",
+            "spoof liquidity",
+            "spoofing",
+            "risk engine",
+            "risk management",
+            "retry",
+            "backoff",
+            "client-side",
+            "design a bot",
+            "design this",
+            "design an emergency",
+        ]
+        if any(marker in q for marker in generic_markers):
+            return "generic_trading"
+
+        # Safe default: treat as Mudrex-specific (RAG + strict rules)
+        return "mudrex_specific"
     
     def generate_response(
         self,
@@ -257,6 +314,67 @@ This is a shared service account — public data only. No personal balances or o
         except Exception as e:
             logger.error(f"Error generating response: {e}", exc_info=True)
             return "Something went wrong on my end — not your code. Try again in a sec?"
+
+    def generate_generic_trading_answer(
+        self,
+        query: str,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+    ) -> str:
+        """
+        Generate an answer for generic trading / system-design questions.
+        This persona is allowed to use general trading knowledge, but MUST NOT
+        make claims about Mudrex-specific behavior or features.
+        """
+        # System prompt focused on generic exchanges and risk/trading design
+        generic_system_instruction = """
+You help developers design and debug trading bots and risk systems for crypto derivatives exchanges in general.
+
+## ROLE
+- Explain how typical futures exchanges behave: orders, fills, margin, leverage, liquidation, throttling, and risk controls.
+- Answer in generic terms: say "on a typical exchange" or "in most futures venues".
+
+## HARD RULES
+- Do NOT claim what Mudrex supports or how Mudrex behaves unless the question explicitly references Mudrex AND you are quoting from provided Mudrex docs.
+- If the user mentions Mudrex but there is no explicit Mudrex documentation in context, answer generically and say it's a general pattern, not Mudrex-specific.
+- It is OK to use your own knowledge for trading/risk design, but keep it clearly generic.
+
+## STYLE
+- Be clear and practical. Walk through state transitions and flows step by step when helpful.
+- Use short sections or bullet points, but keep the tone conversational, not robotic.
+- Include small code or pseudo-code snippets when they make the design easier to implement.
+""".strip()
+
+        parts: List[str] = []
+        if chat_history:
+            history = self._format_history(chat_history[-4:])
+            parts.append(f"Recent conversation (for context):\n{history}")
+        parts.append(f"User question:\n{query}")
+        prompt = "\n\n".join(parts)
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=generic_system_instruction,
+                    temperature=0.3,
+                    max_output_tokens=config.GEMINI_MAX_TOKENS,
+                ),
+            )
+            answer = response.text if response.text else ""
+            if not answer:
+                return "I'm not able to walk through that right now. Try asking again in a bit?"
+
+            answer = self._clean_response(answer)
+            if len(answer) > config.MAX_RESPONSE_LENGTH:
+                answer = (
+                    answer[: config.MAX_RESPONSE_LENGTH - 100]
+                    + "\n\n_(Cut short — ask in smaller pieces?)_"
+                )
+            return answer
+        except Exception as e:
+            logger.error(f"Error generating generic trading answer: {e}", exc_info=True)
+            return "Something went wrong on my side while thinking that through. Try again in a moment?"
 
     def validate_document_relevancy(
         self,

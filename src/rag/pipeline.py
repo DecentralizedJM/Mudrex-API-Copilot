@@ -99,8 +99,30 @@ class RAGPipeline:
                     return cached
             except Exception as e:
                 logger.warning(f"Cache get error (continuing without cache): {e}")
+
+        # 3. Domain classification: Mudrex-specific vs generic trading/system-design
+        domain = self.gemini_client.classify_query_domain(question)
+        if domain == "generic_trading":
+            logger.info("Domain classified as generic_trading; using generic trading persona without Mudrex docs")
+            answer = self.gemini_client.generate_generic_trading_answer(
+                question,
+                chat_history,
+            )
+            result = {
+                'answer': answer,
+                'sources': [{'filename': 'Generic trading knowledge (non-Mudrex-specific)', 'similarity': 1.0}],
+                'is_relevant': True,
+            }
+
+            # Cache generic responses as well (saves tokens for repeated design questions)
+            if self.cache:
+                try:
+                    self.cache.set_response(question, chat_history, mcp_context, result)
+                except Exception as e:
+                    logger.warning(f"Cache set error for generic response (non-critical): {e}")
+            return result
         
-        # 3. Initial retrieval
+        # 4. Initial retrieval (Mudrex-specific path with RAG)
         logger.info(f"Processing query: {question[:50]}...")
         retrieved_docs = self.vector_store.search(question, top_k=top_k)
         
@@ -112,27 +134,27 @@ class RAGPipeline:
         else:
             logger.info("No docs retrieved above threshold")
         
-        # 4. If empty, try iterative retrieval with query transformation
+        # 5. If empty, try iterative retrieval with query transformation
         if not retrieved_docs:
             logger.info("No docs found; trying iterative retrieval with query transformation")
             retrieved_docs = self._iterative_retrieval(question, top_k=top_k)
         
-        # 5. If still empty, use low-threshold search for context
+        # 6. If still empty, use low-threshold search for context
         if not retrieved_docs:
             logger.info("Trying low-threshold search for context")
             retrieved_docs = self.vector_store.search_all_relevant(question, top_k=10)
         
-        # 6. Validate document relevancy (Reliable RAG)
+        # 7. Validate document relevancy (Reliable RAG)
         if retrieved_docs:
             logger.info(f"Validating relevancy of {len(retrieved_docs)} documents")
             retrieved_docs = self.gemini_client.validate_document_relevancy(question, retrieved_docs)
         
-        # 7. Rerank documents for better quality
+        # 8. Rerank documents for better quality
         if retrieved_docs:
             logger.info(f"Reranking {len(retrieved_docs)} documents")
             retrieved_docs = self.gemini_client.rerank_documents(question, retrieved_docs)
         
-        # 8. Generate response
+        # 9. Generate response
         if retrieved_docs:
             # Generate response with validated and reranked docs
             answer = self.gemini_client.generate_response(

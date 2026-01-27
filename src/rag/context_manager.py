@@ -152,13 +152,21 @@ class ContextManager:
         summary = None
         compressed = False
         if len(older) > 0:
-            summary = self._summarize_context(older, query)
-            compressed = True
+            try:
+                summary = self._summarize_context(older, query)
+                compressed = True
+            except Exception as e:
+                logger.warning(f"Error summarizing context (non-critical): {e}")
+                # Continue without summary
         
         # Get relevant memories
         memories = []
         if include_memories and self.semantic_memory:
-            memories = self.semantic_memory.retrieve_memories(chat_id, query, top_k=3)
+            try:
+                memories = self.semantic_memory.retrieve_memories(chat_id, query, top_k=3)
+            except Exception as e:
+                logger.warning(f"Error retrieving semantic memories (non-critical): {e}")
+                memories = []
         
         return {
             'history': recent,

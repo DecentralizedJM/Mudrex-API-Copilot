@@ -608,12 +608,14 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             try:
                 if self.rag_pipeline.context_manager:
                     # Use enhanced context management
+                    logger.info(f"Using context manager for chat {chat_id}, message: {message[:50]}...")
                     result = self.rag_pipeline.query(
                         message,
                         chat_history=None,  # Will be loaded by context manager
                         mcp_context=mcp_context,
                         chat_id=str(chat_id)
                     )
+                    logger.info(f"Query completed successfully, answer length: {len(result.get('answer', ''))}")
                     
                     # Save conversation to persistent storage
                     try:
@@ -644,6 +646,18 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
                 chat_history.append({'role': 'user', 'content': message})
                 chat_history.append({'role': 'assistant', 'content': result['answer']})
                 context.chat_data[history_key] = chat_history[-6:]  # Keep last 6 per group
+            except Exception as query_error:
+                # Error in query processing, log and try fallback
+                logger.error(f"Error in query processing: {query_error}", exc_info=True)
+                logger.info("Attempting fallback without context manager...")
+                try:
+                    result = self.rag_pipeline.query(message, chat_history=chat_history, mcp_context=mcp_context)
+                    chat_history.append({'role': 'user', 'content': message})
+                    chat_history.append({'role': 'assistant', 'content': result['answer']})
+                    context.chat_data[history_key] = chat_history[-6:]
+                except Exception as fallback_error:
+                    logger.error(f"Fallback also failed: {fallback_error}", exc_info=True)
+                    raise  # Re-raise to be caught by outer handler
             
             # Send response
             await self._send_response(update, result['answer'])

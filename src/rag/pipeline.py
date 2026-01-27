@@ -160,6 +160,12 @@ class RAGPipeline:
                 question,
                 chat_history,
             )
+            
+            result = {
+                'answer': answer,
+                'sources': [{'filename': 'Generic trading knowledge (non-Mudrex-specific)', 'similarity': 1.0}],
+                'is_relevant': True,
+            }
 
             # Cache generic responses as well (saves tokens for repeated design questions)
             if self.cache:

@@ -53,12 +53,13 @@ class SemanticMemory:
             return None
         
         try:
-            response = self.client.models.embed_content(
+            # Use the correct API format (same as vector_store.py)
+            result = self.client.models.embed_content(
                 model=self.embedding_model,
-                content=text
+                contents=text,  # text is a string, not a list
             )
-            if response and hasattr(response, 'embeddings') and response.embeddings:
-                return response.embeddings[0].values
+            if result and hasattr(result, 'embeddings') and result.embeddings:
+                return result.embeddings[0].values
             return None
         except Exception as e:
             logger.warning(f"Error getting embedding for memory: {e}")

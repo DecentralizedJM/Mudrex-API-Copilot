@@ -744,9 +744,15 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
                 remaining = remaining[sentence_split + 2:].strip()
                 continue
             
-            # Last resort: hard split at max_length
-            chunks.append(remaining[:max_length].strip())
-            remaining = remaining[max_length:].strip()
+            # Last resort: hard split at max_length, but avoid cutting @mentions
+            # Try to find a space before max_length to avoid cutting tags
+            space_split = remaining.rfind(' ', 0, max_length)
+            if space_split > max_length * 0.8:  # Use if we get at least 80% of max_length
+                chunks.append(remaining[:space_split].strip())
+                remaining = remaining[space_split:].strip()
+            else:
+                chunks.append(remaining[:max_length].strip())
+                remaining = remaining[max_length:].strip()
         
         if remaining:
             chunks.append(remaining)

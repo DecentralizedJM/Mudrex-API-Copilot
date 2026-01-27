@@ -101,6 +101,14 @@ class VectorStore:
                 
                 return embedding
             except Exception as e:
+                # Report embedding errors
+                try:
+                    from ..lib.error_reporter import report_error_sync
+                    if report_error_sync:
+                        report_error_sync(e, "exception", context={"method": "vector_store._get_embedding", "attempt": attempt + 1, "model": config.EMBEDDING_MODEL})
+                except Exception:
+                    pass  # Don't let error reporting break embeddings
+                
                 if attempt < retries:
                     logger.warning(f"Embedding retry {attempt + 1}/{retries}: {e}")
                     time.sleep(0.5)  # Brief pause before retry

@@ -63,6 +63,13 @@ class SemanticMemory:
             return None
         except Exception as e:
             logger.warning(f"Error getting embedding for memory: {e}")
+            # Report embedding errors
+            try:
+                from ..lib.error_reporter import report_error_sync
+                if report_error_sync:
+                    report_error_sync(e, "exception", context={"method": "semantic_memory._get_embedding", "model": self.embedding_model})
+            except Exception:
+                pass
             return None
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:

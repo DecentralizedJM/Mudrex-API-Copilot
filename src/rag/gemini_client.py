@@ -12,8 +12,15 @@ import re
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 
 from ..config import config
+
+# Import error reporter (avoid circular import)
+try:
+    from ..lib.error_reporter import report_error
+except ImportError:
+    report_error = None
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +29,26 @@ try:
     from .cache import RedisCache
 except ImportError:
     RedisCache = None
+
+# Import error reporter (avoid circular import)
+try:
+    from ..lib.error_reporter import report_error_sync
+    HAS_ERROR_REPORTER = True
+except ImportError:
+    report_error_sync = None
+    HAS_ERROR_REPORTER = False
+
+
+def _report_gemini_error(error: Exception, context: dict = None):
+    """Helper to report Gemini API errors synchronously"""
+    if HAS_ERROR_REPORTER and report_error_sync:
+        try:
+            error_context = {"component": "gemini_client"}
+            if context:
+                error_context.update(context)
+            report_error_sync(error, "exception", error_context)
+        except Exception:
+            pass  # Don't let error reporting break the bot
 
 
 class GeminiClient:
@@ -342,8 +369,13 @@ This is a shared service account — public data only. No personal balances or o
             
             return answer
             
+        except ClientError as e:
+            logger.error(f"Gemini API error generating response: {e}", exc_info=True)
+            _report_gemini_error(e, {"method": "generate_response", "model": self.model_name, "error_type": "ClientError"})
+            return "Something went wrong on my end — not your code. Try again in a sec?"
         except Exception as e:
             logger.error(f"Error generating response: {e}", exc_info=True)
+            _report_gemini_error(e, {"method": "generate_response"})
             return "Something went wrong on my end — not your code. Try again in a sec?"
 
     def generate_generic_trading_answer(
@@ -433,8 +465,13 @@ limiter.wait_if_needed()
 
             answer = self._clean_response(answer)
             return answer
+        except ClientError as e:
+            logger.error(f"Gemini API error generating generic trading answer: {e}", exc_info=True)
+            _report_gemini_error(e, {"method": "generate_generic_trading_answer", "error_type": "ClientError"})
+            return "Something went wrong on my side while thinking that through. Try again in a moment?"
         except Exception as e:
             logger.error(f"Error generating generic trading answer: {e}", exc_info=True)
+            _report_gemini_error(e, {"method": "generate_generic_trading_answer"})
             return "Something went wrong on my side while thinking that through. Try again in a moment?"
 
     def validate_document_relevancy(
@@ -528,8 +565,27 @@ Score 0.0-1.0 based on how well the document answers the question. Only return t
                             logger.debug(f"Document filtered out: score={result.get('score', 0):.2f}")
                         break  # Success, exit retry loop
                         
+                    except ClientError as api_error:
+                        error_str = str(api_error)
+                        # Report API errors
+                        _report_gemini_error(api_error, {"method": "validate_document_relevancy", "attempt": attempt + 1, "error_type": "ClientError"})
+                        # Check if it's a 503 or rate limit error
+                        if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
+                            if attempt < max_retries:
+                                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                                logger.warning(f"Gemini overloaded (503), retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
+                                time.sleep(wait_time)
+                                continue
+                            else:
+                                logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, including doc to be safe")
+                                validated_docs.append(doc)
+                                break
+                        else:
+                            # Other errors - re-raise to outer except
+                            raise
                     except Exception as api_error:
                         error_str = str(api_error)
+                        _report_gemini_error(api_error, {"method": "validate_document_relevancy", "attempt": attempt + 1})
                         # Check if it's a 503 or rate limit error
                         if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
                             if attempt < max_retries:
@@ -547,6 +603,7 @@ Score 0.0-1.0 based on how well the document answers the question. Only return t
                             
             except Exception as e:
                 logger.warning(f"Error validating document relevancy: {e}")
+                _report_gemini_error(e, {"method": "validate_document_relevancy", "error_type": "validation_failure"})
                 # On error, include the doc to be safe (better than filtering out good docs)
                 validated_docs.append(doc)
         
@@ -654,8 +711,9 @@ Return ONLY a JSON array of document indices (0-based) sorted by relevance (most
                     logger.info(f"Reranked {len(ranked_docs)} documents")
                     return ranked_docs
                     
-                except Exception as api_error:
+                except ClientError as api_error:
                     error_str = str(api_error)
+                    _report_gemini_error(api_error, {"method": "rerank_documents", "attempt": attempt + 1, "error_type": "ClientError"})
                     # Check if it's a 503 or rate limit error
                     if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
                         if attempt < max_retries:
@@ -667,11 +725,28 @@ Return ONLY a JSON array of document indices (0-based) sorted by relevance (most
                             logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using similarity order")
                             break
                     else:
-                        # Other errors - re-raise to outer except
-                        raise
+                        # Other errors - break and fall back
+                        break
+                except Exception as api_error:
+                    error_str = str(api_error)
+                    _report_gemini_error(api_error, {"method": "rerank_documents", "attempt": attempt + 1})
+                    # Check if it's a 503 or rate limit error
+                    if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
+                        if attempt < max_retries:
+                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                            logger.warning(f"Gemini overloaded (503) for reranking, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using similarity order")
+                            break
+                    else:
+                        # Other errors - break and fall back
+                        break
                         
         except Exception as e:
             logger.warning(f"Error reranking documents: {e}, using similarity order")
+            _report_gemini_error(e, {"method": "rerank_documents", "error_type": "rerank_failure"})
         
         # Fall back to similarity-based ranking
         return sorted(documents, key=lambda x: x.get('similarity', 0), reverse=True)[:top_k]
@@ -749,8 +824,9 @@ Return ONLY the transformed query, nothing else."""
                         # Empty or too short transformation, fall back
                         break
                         
-                except Exception as api_error:
+                except ClientError as api_error:
                     error_str = str(api_error)
+                    _report_gemini_error(api_error, {"method": "transform_query", "attempt": attempt + 1, "error_type": "ClientError"})
                     # Check if it's a 503 or rate limit error
                     if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
                         if attempt < max_retries:
@@ -762,11 +838,28 @@ Return ONLY the transformed query, nothing else."""
                             logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using original query")
                             break
                     else:
-                        # Other errors - re-raise to outer except
-                        raise
+                        # Other errors - break and return original query
+                        break
+                except Exception as api_error:
+                    error_str = str(api_error)
+                    _report_gemini_error(api_error, {"method": "transform_query", "attempt": attempt + 1})
+                    # Check if it's a 503 or rate limit error
+                    if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
+                        if attempt < max_retries:
+                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                            logger.warning(f"Gemini overloaded (503) for query transform, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using original query")
+                            break
+                    else:
+                        # Other errors - break and return original query
+                        break
                         
         except Exception as e:
             logger.warning(f"Error transforming query: {e}")
+            _report_gemini_error(e, {"method": "transform_query", "error_type": "transform_failure"})
         
         # Fall back to original query
         return query
@@ -852,8 +945,13 @@ Return ONLY the transformed query, nothing else."""
                 answer = answer[:config.MAX_RESPONSE_LENGTH - 100] + "\n\n_(Cut short — ask something more specific?)_"
             
             return answer
+        except ClientError as e:
+            logger.error(f"Gemini API error in context search response: {e}", exc_info=True)
+            _report_gemini_error(e, {"method": "generate_response_with_context_search", "error_type": "ClientError"})
+            return "Something went wrong on my end — not your code. Try again in a sec?"
         except Exception as e:
             logger.error(f"Error in context search response: {e}", exc_info=True)
+            _report_gemini_error(e, {"method": "generate_response_with_context_search"})
             return "Something went wrong on my end — not your code. Try again in a sec?"
     
     def _generate_smart_fallback(
@@ -926,8 +1024,13 @@ Generate a helpful response:"""
                 answer = f"This isn't in my Mudrex docs, but {answer.lower()}"
             
             return answer
+        except ClientError as e:
+            logger.error(f"Gemini API error in smart fallback: {e}", exc_info=True)
+            _report_gemini_error(e, {"method": "_generate_smart_fallback", "error_type": "ClientError"})
+            return "I don't have that in my Mudrex docs. Can you share more details, or @DecentralizedJM might know?"
         except Exception as e:
             logger.error(f"Error in smart fallback: {e}", exc_info=True)
+            _report_gemini_error(e, {"method": "_generate_smart_fallback"})
             return "I don't have that in my Mudrex docs. Can you share more details, or @DecentralizedJM might know?"
     
     def _build_prompt(
@@ -1055,8 +1158,13 @@ Generate a helpful response:"""
                 logger.warning("Empty response from Gemini for intent parsing")
                 return {"action": "NONE"}
             return json.loads(response.text)
+        except ClientError as e:
+            logger.error(f"Gemini API error parsing intent: {e}")
+            _report_gemini_error(e, {"method": "parse_learning_instruction", "error_type": "ClientError"})
+            return {"action": "NONE"}
         except Exception as e:
             logger.error(f"Error parsing intent: {e}")
+            _report_gemini_error(e, {"method": "parse_learning_instruction"})
             return {"action": "NONE"}
 
     def get_brief_response(self, message_type: str) -> str:

@@ -26,6 +26,7 @@ from ..config import config
 from ..rag import RAGPipeline
 from ..mcp import MudrexMCPClient, MudrexTools
 from ..tasks.futures_listing_watcher import fetch_all_futures_symbols, fetch_all_futures_symbols_via_rest
+from ..lib.error_reporter import report_error
 
 logger = logging.getLogger(__name__)
 
@@ -667,6 +668,11 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             # Log more details for debugging
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
+            # Report to Station Master
+            try:
+                await report_error(e, "exception", context={"handler": "handle_message"})
+            except Exception:
+                pass  # Don't let error reporting break the bot
             
             # More helpful error message
             error_msg = "That didn't work — try again? If it keeps failing, might be a temporary issue."

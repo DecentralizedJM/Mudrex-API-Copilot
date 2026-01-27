@@ -20,6 +20,7 @@ from src.rag import RAGPipeline
 from src.bot import MudrexBot
 from src.mcp import MudrexMCPClient
 from src.tasks.scheduler import setup_scheduler
+from src.lib.error_reporter import report_error_sync, report_error
 
 # Configure logging
 logging.basicConfig(
@@ -136,6 +137,7 @@ async def async_main():
         logger.info("Received shutdown signal")
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
+        await report_error(e, "crash")
         raise
     finally:
         logger.info("Shutting down...")
@@ -150,14 +152,49 @@ async def async_main():
         logger.info("Shutdown complete")
 
 
+def setup_global_error_handlers():
+    """Setup global error handlers for uncaught exceptions"""
+    import sys
+    
+    def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
+        """Handle uncaught exceptions"""
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        
+        error = exc_value if isinstance(exc_value, Exception) else Exception(str(exc_value))
+        logger.error(f"Uncaught exception: {error}", exc_info=(exc_type, exc_value, exc_traceback))
+        
+        # Report to Station Master (sync version for exception hook)
+        report_error_sync(error, "crash")
+        
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    
+    def handle_unhandled_rejection(reason):
+        """Handle unhandled promise rejections (for asyncio)"""
+        error = reason if isinstance(reason, Exception) else Exception(str(reason))
+        logger.error(f"Unhandled exception in async task: {error}", exc_info=True)
+        report_error_sync(error, "exception")
+    
+    # Set exception handler
+    sys.excepthook = handle_uncaught_exception
+    
+    # Note: Python doesn't have unhandledRejection like Node.js,
+    # but asyncio tasks that fail are caught in the event loop
+
+
 def main():
     """Main entry point"""
+    # Setup global error handlers
+    setup_global_error_handlers()
+    
     try:
         asyncio.run(async_main())
     except KeyboardInterrupt:
         logger.info("Goodbye!")
     except Exception as e:
         logger.error(f"Application error: {e}", exc_info=True)
+        report_error_sync(e, "crash")
         sys.exit(1)
 
 

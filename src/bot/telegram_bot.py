@@ -657,11 +657,13 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         
         return False
     
-    def _split_message(self, text: str, max_length: int = 4000) -> List[str]:
+    def _split_message(self, text: str, max_length: int = None) -> List[str]:
         """
         Split long messages into chunks that fit within Telegram's limit.
         Tries to split at paragraph boundaries (double newlines) or sentence boundaries.
         """
+        if max_length is None:
+            max_length = config.MAX_RESPONSE_LENGTH
         if len(text) <= max_length:
             return [text]
         

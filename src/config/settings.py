@@ -45,7 +45,7 @@ class Config:
     SIMILARITY_THRESHOLD: float = 0.55  # Slightly lower for better recall
     
     # Bot Behavior
-    MAX_RESPONSE_LENGTH: int = 4000  # Telegram limit is 4096
+    MAX_RESPONSE_LENGTH: int = 4096  # Telegram's actual message limit
     ONLY_RESPOND_TO_QUESTIONS: bool = True
     AUTO_DETECT_QUERIES: bool = True
     

@@ -21,6 +21,7 @@ from telegram.ext import (
     ContextTypes
 )
 from telegram.constants import ParseMode, ChatAction, ChatType
+from telegram.error import Conflict, TimedOut, NetworkError
 
 from ..config import config
 from ..rag import RAGPipeline
@@ -806,11 +807,43 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
     
     async def start_async(self):
         """Start the bot (async)"""
-        await self.app.initialize()
-        await self.setup_commands()
-        await self.app.start()
-        await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-        logger.info("MudrexBot started (GROUP-ONLY mode)")
+        try:
+            await self.app.initialize()
+            await self.setup_commands()
+            await self.app.start()
+            await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+            logger.info("MudrexBot started (GROUP-ONLY mode)")
+        except Conflict as e:
+            logger.error("=" * 60)
+            logger.error("TELEGRAM BOT CONFLICT ERROR")
+            logger.error("=" * 60)
+            logger.error("Another bot instance is already running!")
+            logger.error("This happens when:")
+            logger.error("  1. Multiple deployments are running (local + production)")
+            logger.error("  2. Previous instance didn't shut down properly")
+            logger.error("  3. Another process is using the same bot token")
+            logger.error("")
+            logger.error("Solutions:")
+            logger.error("  1. Stop all other bot instances")
+            logger.error("  2. Wait 60 seconds for Telegram to release the connection")
+            logger.error("  3. Check Railway/deployment logs for other running instances")
+            logger.error("  4. Use webhook mode instead of polling if needed")
+            logger.error("=" * 60)
+            await report_error(e, "exception", context={"error_type": "telegram_conflict"})
+            raise
+        except (TimedOut, NetworkError) as e:
+            logger.warning(f"Network error during startup: {e}")
+            logger.info("Retrying in 5 seconds...")
+            import asyncio
+            await asyncio.sleep(5)
+            # Retry once
+            try:
+                await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+                logger.info("MudrexBot started after retry (GROUP-ONLY mode)")
+            except Exception as retry_error:
+                logger.error(f"Retry failed: {retry_error}")
+                await report_error(retry_error, "exception", context={"error_type": "telegram_startup_retry"})
+                raise
     
     async def stop(self):
         """Stop the bot gracefully"""

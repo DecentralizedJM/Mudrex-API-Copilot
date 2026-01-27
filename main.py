@@ -136,7 +136,17 @@ async def async_main():
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        # Check if it's a Telegram Conflict error
+        error_msg = str(e)
+        if "Conflict" in error_msg or "terminated by other getUpdates" in error_msg:
+            logger.error("=" * 60)
+            logger.error("BOT STARTUP FAILED: Multiple instances detected")
+            logger.error("=" * 60)
+            logger.error("Please ensure only ONE bot instance is running.")
+            logger.error("Check Railway deployments and stop any duplicate instances.")
+            logger.error("=" * 60)
+        else:
+            logger.error(f"Fatal error: {e}", exc_info=True)
         await report_error(e, "crash")
         raise
     finally:

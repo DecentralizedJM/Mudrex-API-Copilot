@@ -33,7 +33,7 @@ class Config:
     # Gemini AI Settings (NEW SDK)
     GEMINI_MODEL: str = "gemini-3-flash-preview"  # Latest model
     GEMINI_TEMPERATURE: float = 0.4  # Slightly creative but focused
-    GEMINI_MAX_TOKENS: int = 2048
+    GEMINI_MAX_TOKENS: int = 800  # Reduced for concise responses
     
     # Vector Store
     CHROMA_PERSIST_DIR: str = "./data/chroma"

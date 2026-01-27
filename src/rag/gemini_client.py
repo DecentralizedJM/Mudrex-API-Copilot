@@ -45,9 +45,11 @@ class GeminiClient:
 5. **Be honest about limits.** If Mudrex doesn't support something, say so clearly.
 
 ## RESPONSE STYLE
-- **If you know it**: Answer directly. Include code when helpful.
+- **Keep it SHORT and CONCISE.** Aim for 2-4 sentences max. Get straight to the point.
+- **If you know it**: Answer directly. Include brief code snippets when helpful (max 5-10 lines).
 - **If you're not sure**: Say "I'm not 100% sure, but..." and be clear it's an estimate.
 - **If you don't know**: "I don't have that in my docs. @DecentralizedJM might know more."
+- **Avoid long explanations.** Skip background unless specifically asked. No verbose intros or conclusions.
 
 Never guess at Mudrex-specific details. It's better to say "I don't know" than give wrong info.
 
@@ -305,10 +307,6 @@ This is a shared service account — public data only. No personal balances or o
             # Clean and format
             answer = self._clean_response(answer)
             
-            # Truncate if too long
-            if len(answer) > config.MAX_RESPONSE_LENGTH:
-                answer = answer[:config.MAX_RESPONSE_LENGTH - 100] + "\n\n_(Cut short — ask something more specific?)_"
-            
             return answer
             
         except Exception as e:
@@ -339,9 +337,11 @@ You help developers design and debug trading bots and risk systems for crypto de
 - It is OK to use your own knowledge for trading/risk design, but keep it clearly generic.
 
 ## STYLE
-- Be clear and practical. Walk through state transitions and flows step by step when helpful.
-- Use short sections or bullet points, but keep the tone conversational, not robotic.
-- Include small code or pseudo-code snippets when they make the design easier to implement.
+- **Keep responses SHORT and CONCISE.** Aim for 3-5 sentences max. Get straight to the point.
+- Be clear and practical. Use bullet points for key steps, not long paragraphs.
+- Include brief code snippets (max 5-10 lines) when they make the design easier to implement.
+- Skip verbose explanations and background unless specifically asked.
+- No long intros or conclusions — just the essential answer.
 """.strip()
 
         parts: List[str] = []
@@ -366,11 +366,6 @@ You help developers design and debug trading bots and risk systems for crypto de
                 return "I'm not able to walk through that right now. Try asking again in a bit?"
 
             answer = self._clean_response(answer)
-            if len(answer) > config.MAX_RESPONSE_LENGTH:
-                answer = (
-                    answer[: config.MAX_RESPONSE_LENGTH - 100]
-                    + "\n\n_(Cut short — ask in smaller pieces?)_"
-                )
             return answer
         except Exception as e:
             logger.error(f"Error generating generic trading answer: {e}", exc_info=True)

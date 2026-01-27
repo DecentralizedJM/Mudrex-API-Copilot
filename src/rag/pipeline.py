@@ -121,22 +121,26 @@ class RAGPipeline:
         enhanced_context = None
         semantic_memories = []
         if self.context_manager and chat_id:
-            enhanced_context = self.context_manager.get_context(
-                chat_id=str(chat_id),
-                query=question,
-                include_recent=5,
-                include_memories=True
-            )
-            semantic_memories = enhanced_context.get('memories', [])
-            
-            # Use enhanced history if available
-            if enhanced_context.get('history'):
-                chat_history = enhanced_context['history']
-                if enhanced_context.get('summary'):
-                    # Prepend summary to history
-                    chat_history = [
-                        {'role': 'system', 'content': enhanced_context['summary']}
-                    ] + chat_history
+            try:
+                enhanced_context = self.context_manager.get_context(
+                    chat_id=str(chat_id),
+                    query=question,
+                    include_recent=5,
+                    include_memories=True
+                )
+                semantic_memories = enhanced_context.get('memories', [])
+                
+                # Use enhanced history if available
+                if enhanced_context.get('history'):
+                    chat_history = enhanced_context['history']
+                    if enhanced_context.get('summary'):
+                        # Prepend summary to history
+                        chat_history = [
+                            {'role': 'system', 'content': enhanced_context['summary']}
+                        ] + chat_history
+            except Exception as ctx_error:
+                logger.warning(f"Error getting enhanced context (using fallback): {ctx_error}")
+                # Continue with regular chat_history
         
         # 3. Domain classification: Mudrex-specific vs generic trading/system-design
         domain = self.gemini_client.classify_query_domain(question)

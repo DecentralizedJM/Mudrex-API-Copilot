@@ -605,25 +605,39 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
                     logger.info(f"MCP co-pilot: {tool_name} -> {len(mcp_context or '')} chars")
             
             # Use context manager if available, otherwise fallback to old method
-            if self.rag_pipeline.context_manager:
-                # Use enhanced context management
-                result = self.rag_pipeline.query(
-                    message,
-                    chat_history=None,  # Will be loaded by context manager
-                    mcp_context=mcp_context,
-                    chat_id=str(chat_id)
-                )
-                
-                # Save conversation to persistent storage
-                self.rag_pipeline.context_manager.add_message(str(chat_id), 'user', message)
-                self.rag_pipeline.context_manager.add_message(str(chat_id), 'assistant', result['answer'])
-                
-                # Extract facts from conversation periodically
-                if len(self.rag_pipeline.context_manager.load_session(str(chat_id))) % 5 == 0:
-                    recent = self.rag_pipeline.context_manager.load_session(str(chat_id))[-5:]
-                    self.rag_pipeline.context_manager.extract_facts(str(chat_id), recent)
-            else:
-                # Fallback to old method
+            try:
+                if self.rag_pipeline.context_manager:
+                    # Use enhanced context management
+                    result = self.rag_pipeline.query(
+                        message,
+                        chat_history=None,  # Will be loaded by context manager
+                        mcp_context=mcp_context,
+                        chat_id=str(chat_id)
+                    )
+                    
+                    # Save conversation to persistent storage
+                    try:
+                        self.rag_pipeline.context_manager.add_message(str(chat_id), 'user', message)
+                        self.rag_pipeline.context_manager.add_message(str(chat_id), 'assistant', result['answer'])
+                        
+                        # Extract facts from conversation periodically
+                        session = self.rag_pipeline.context_manager.load_session(str(chat_id))
+                        if len(session) % 5 == 0 and len(session) > 0:
+                            recent = session[-5:]
+                            self.rag_pipeline.context_manager.extract_facts(str(chat_id), recent)
+                    except Exception as ctx_error:
+                        logger.warning(f"Context manager error (non-critical): {ctx_error}")
+                else:
+                    # Fallback to old method
+                    result = self.rag_pipeline.query(message, chat_history=chat_history, mcp_context=mcp_context)
+                    
+                    # Update history
+                    chat_history.append({'role': 'user', 'content': message})
+                    chat_history.append({'role': 'assistant', 'content': result['answer']})
+                    context.chat_data[history_key] = chat_history[-6:]  # Keep last 6 per group
+            except AttributeError as attr_error:
+                # Context manager not available, use fallback
+                logger.warning(f"Context manager not available, using fallback: {attr_error}")
                 result = self.rag_pipeline.query(message, chat_history=chat_history, mcp_context=mcp_context)
                 
                 # Update history
@@ -636,9 +650,13 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)
-            await update.message.reply_text(
-                "That didn't work — try again? If it keeps failing, might be a temporary issue."
-            )
+            # Log more details for debugging
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # More helpful error message
+            error_msg = "That didn't work — try again? If it keeps failing, might be a temporary issue."
+            await update.message.reply_text(error_msg)
     
     def _is_bot_mentioned(self, update: Update) -> bool:
         """

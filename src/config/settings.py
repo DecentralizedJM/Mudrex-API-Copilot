@@ -76,6 +76,13 @@ class Config:
     REDIS_TTL_TRANSFORM: int = 604800  # 7 days
     REDIS_TTL_EMBEDDING: int = 2592000  # 30 days
     
+    # Context Management
+    MAX_HISTORY_MESSAGES: int = 15  # Max messages before trimming
+    CONTEXT_COMPRESS_THRESHOLD: int = 20  # Messages before compression
+    MAX_TOKENS_PER_MESSAGE: int = 200  # Token limit per message
+    REDIS_TTL_SESSION: int = 2592000  # 30 days
+    REDIS_TTL_MEMORY: int = 2592000  # 30 days
+    
     # Changelog watcher (daily scrape + broadcast to ALLOWED_CHAT_IDS)
     ENABLE_CHANGELOG_WATCHER: bool = True
     CHANGELOG_CRON_HOUR: int = 2  # 2 AM UTC

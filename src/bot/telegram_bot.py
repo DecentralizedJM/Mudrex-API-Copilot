@@ -71,6 +71,7 @@ class MudrexBot:
         
         self.app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
         self._register_handlers()
+        self._register_error_handlers()
         
         logger.info("MudrexBot initialized (AI co-pilot, GROUP-ONLY)")
     
@@ -118,8 +119,43 @@ class MudrexBot:
                 self.handle_document
             )
         )
+    
+    def _register_error_handlers(self):
+        """Register error handlers for runtime errors"""
+        async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+            """Handle errors during polling and message processing"""
+            error = context.error
+            
+            if isinstance(error, Conflict):
+                logger.error("=" * 60)
+                logger.error("RUNTIME CONFLICT ERROR - Multiple bot instances detected!")
+                logger.error("=" * 60)
+                logger.error("Another bot instance started polling while this one was running.")
+                logger.error("This usually means:")
+                logger.error("  1. A new deployment started while old one is still running")
+                logger.error("  2. Local dev instance conflicts with production")
+                logger.error("  3. Railway auto-restarted but old container didn't stop")
+                logger.error("")
+                logger.error("Action: This instance will continue, but may miss messages.")
+                logger.error("Check Railway for duplicate deployments and stop them.")
+                logger.error("=" * 60)
+                # Report to Station Master
+                try:
+                    await report_error(error, "exception", context={"error_type": "telegram_runtime_conflict"})
+                except Exception:
+                    pass
+                # Don't crash - just log and continue
+                return
+            
+            # Log other errors
+            logger.error(f"Unhandled error in update handler: {error}", exc_info=error)
+            try:
+                await report_error(error, "exception", context={"handler": "telegram_error_handler"})
+            except Exception:
+                pass
         
-        self.app.add_error_handler(self.error_handler)
+        # Register the error handler
+        self.app.add_error_handler(error_handler)
         logger.info("Handlers registered (GROUP-ONLY)")
     
     async def handle_dm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -671,13 +707,17 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             logger.error(f"Full traceback: {traceback.format_exc()}")
             # Report to Station Master
             try:
-                await report_error(e, "exception", context={"handler": "handle_message"})
+                await report_error(e, "exception", context={"handler": "handle_message", "message_preview": message[:100] if message else "no message"})
             except Exception:
                 pass  # Don't let error reporting break the bot
             
-            # More helpful error message
-            error_msg = "That didn't work — try again? If it keeps failing, might be a temporary issue."
-            await update.message.reply_text(error_msg)
+            # Check if we can send a response (update might be None in some error cases)
+            try:
+                if update and update.message:
+                    error_msg = "That didn't work — try again? If it keeps failing, might be a temporary issue."
+                    await update.message.reply_text(error_msg)
+            except Exception as send_error:
+                logger.error(f"Could not send error message to user: {send_error}")
     
     def _is_bot_mentioned(self, update: Update) -> bool:
         """
@@ -794,11 +834,6 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
                 plain = plain.replace('...', '')
                 await update.message.reply_text(plain, disable_web_page_preview=True)
     
-    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle errors"""
-        logger.error(f"Error: {context.error}", exc_info=context.error)
-        if update and update.message:
-            await update.message.reply_text("Hmm, that broke something. Mind trying again?")
     
     def run(self):
         """Start the bot (blocking)"""

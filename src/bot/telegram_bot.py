@@ -270,7 +270,7 @@ Just ask your question or tag me with @.
 
 /help — what I can do
 /endpoints — API endpoints
-/futures — list futures pairs"""
+/listfutures — list futures pairs (count)"""
         
         await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
     
@@ -290,7 +290,7 @@ Just ask your question or tag me with @.
 
 *Commands:*
 /endpoints — API endpoints list
-/futures — count of futures pairs
+/listfutures — count of futures pairs
 /mcp — setup guide for Claude Desktop
 
 For personal account data (positions, orders), use Claude Desktop with your own API key."""
@@ -582,8 +582,29 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             update.message.reply_to_message.from_user.is_bot
         )
         
-        # Check if message is API-related
-        is_api_related = self.rag_pipeline.gemini_client.is_api_related_query(message)
+        # Strip bot @mention from the message before intent detection so
+        # "hello @API_Assistant_V2_bot" is treated as a greeting, not an API query.
+        cleaned_message = message
+        if self.app.bot and self.app.bot.username:
+            try:
+                pattern = re.compile(rf"@{re.escape(self.app.bot.username)}\b", re.IGNORECASE)
+                cleaned_message = pattern.sub("", message).strip()
+            except re.error:
+                # If regex compilation fails for some reason, fall back to original message
+                cleaned_message = message.strip()
+        else:
+            cleaned_message = message.strip()
+        
+        # Lightweight handling for pure greetings when tagged (no RAG, no Gemini call)
+        if bot_mentioned and not is_reply_to_bot:
+            lower_clean = cleaned_message.lower()
+            if re.fullmatch(r"(hi|hello|hey|yo|gm|gn)[\s!,.]*", lower_clean):
+                brief = self.rag_pipeline.gemini_client.get_brief_response("greeting")
+                await update.message.reply_text(brief)
+                return
+        
+        # Check if message is API-related (after stripping the bot mention)
+        is_api_related = self.rag_pipeline.gemini_client.is_api_related_query(cleaned_message)
         
         # Respond if:
         # 1. Reply to bot's message (always respond - conversation continuation)
@@ -624,7 +645,7 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             
             # AI co-pilot: live data via REST (GET /fapi/v1/futures) or MCP
             mcp_context = None
-            mcp_info = self._resolve_mcp_call(message)
+            mcp_info = self._resolve_mcp_call(cleaned_message)
             # list_futures: REST (preferred) or MCP, reply with count and GET /fapi/v1/futures doc
             if mcp_info and mcp_info[0] == "list_futures" and (config.MUDREX_API_SECRET or (self.mcp_client and self.mcp_client.is_authenticated())):
                 symbols = await fetch_all_futures_symbols_via_rest(config.MUDREX_API_SECRET) if config.MUDREX_API_SECRET else await fetch_all_futures_symbols(self.mcp_client)
@@ -646,9 +667,9 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             try:
                 if self.rag_pipeline.context_manager:
                     # Use enhanced context management
-                    logger.info(f"Using context manager for chat {chat_id}, message: {message[:50]}...")
+                    logger.info(f"Using context manager for chat {chat_id}, message: {cleaned_message[:50]}...")
                     result = self.rag_pipeline.query(
-                        message,
+                        cleaned_message,
                         chat_history=None,  # Will be loaded by context manager
                         mcp_context=mcp_context,
                         chat_id=str(chat_id)
@@ -669,19 +690,19 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
                         logger.warning(f"Context manager error (non-critical): {ctx_error}")
                 else:
                     # Fallback to old method
-                    result = self.rag_pipeline.query(message, chat_history=chat_history, mcp_context=mcp_context)
+                    result = self.rag_pipeline.query(cleaned_message, chat_history=chat_history, mcp_context=mcp_context)
                     
                     # Update history
-                    chat_history.append({'role': 'user', 'content': message})
+                    chat_history.append({'role': 'user', 'content': cleaned_message})
                     chat_history.append({'role': 'assistant', 'content': result['answer']})
                     context.chat_data[history_key] = chat_history[-6:]  # Keep last 6 per group
             except AttributeError as attr_error:
                 # Context manager not available, use fallback
                 logger.warning(f"Context manager not available, using fallback: {attr_error}")
-                result = self.rag_pipeline.query(message, chat_history=chat_history, mcp_context=mcp_context)
+                result = self.rag_pipeline.query(cleaned_message, chat_history=chat_history, mcp_context=mcp_context)
                 
                 # Update history
-                chat_history.append({'role': 'user', 'content': message})
+                chat_history.append({'role': 'user', 'content': cleaned_message})
                 chat_history.append({'role': 'assistant', 'content': result['answer']})
                 context.chat_data[history_key] = chat_history[-6:]  # Keep last 6 per group
             except Exception as query_error:
@@ -689,8 +710,8 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
                 logger.error(f"Error in query processing: {query_error}", exc_info=True)
                 logger.info("Attempting fallback without context manager...")
                 try:
-                    result = self.rag_pipeline.query(message, chat_history=chat_history, mcp_context=mcp_context)
-                    chat_history.append({'role': 'user', 'content': message})
+                    result = self.rag_pipeline.query(cleaned_message, chat_history=chat_history, mcp_context=mcp_context)
+                    chat_history.append({'role': 'user', 'content': cleaned_message})
                     chat_history.append({'role': 'assistant', 'content': result['answer']})
                     context.chat_data[history_key] = chat_history[-6:]
                 except Exception as fallback_error:

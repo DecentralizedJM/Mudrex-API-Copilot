@@ -110,9 +110,10 @@ def _extract_symbols(data: Any) -> Set[str]:
     return symbols
 
 
-# Page size for GET /fapi/v1/futures. Paginate until the API returns fewer items.
+# Page size for GET /fapi/v1/futures.
+# We paginate with this limit until the API returns fewer items or we hit a very high safety cap.
 _LIST_FUTURES_PAGE_SIZE = 500
-_LIST_FUTURES_MAX_ITEMS = 5000
+_LIST_FUTURES_MAX_ITEMS = 20000
 
 # REST: GET /fapi/v1/futures — https://docs.trade.mudrex.com/docs/get-asset-listing
 _FUTURES_REST_URL = "https://trade.mudrex.com/fapi/v1/futures"

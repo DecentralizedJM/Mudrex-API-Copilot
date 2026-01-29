@@ -640,7 +640,7 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         # But if it's a reply to the bot, always process it (continuation)
         if bot_mentioned and not is_reply_to_bot and not is_api_related:
             await update.message.reply_text(
-                "What's the error code or message you're seeing? Or share the code/request you're using."
+                "I can only help with Mudrex API questions — auth, endpoints, errors, or code examples. Ask me something like that and I’ll do my best."
             )
             return
         

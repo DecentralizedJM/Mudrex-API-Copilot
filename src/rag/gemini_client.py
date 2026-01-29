@@ -217,10 +217,12 @@ This is a shared service account — public data only. No personal balances or o
         # API and trading keywords
         # STRONG keywords (sufficient alone when msg length > 5)
         strong_keywords = [
-            'mudrex', 'fapi', 'api', 'endpoint', 'webhook', 'websocket', 'mcp',
+            'mudrex', 'fapi', 'api', 'endpoint', 'end point', 'webhook', 'websocket', 'mcp',
             'x-authentication', 'auth', 'token', 'secret', 'jwt', 'key',
             'btc', 'eth', 'usdt', 'futures', 'perpetual',
             'rest', 'trade.mudrex.com', 'fapi/v1', 'http', 'https',
+            # Trade ideas / signals (community_resources.md)
+            'trade ideas', 'signals', 'signal',
             # Troubleshooting keywords
             'status', 'response', 'connection', 'broken', 'issue', 'debug',
             'unauthorized', 'forbidden', 'invalid',

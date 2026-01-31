@@ -59,6 +59,11 @@ async def async_main():
     validate_config()
     logger.info("Configuration validated")
     
+    # Start health server FIRST so Railway health check passes during slow init
+    health_port = int(os.getenv("PORT") or os.getenv("HEALTH_PORT", "8080"))
+    health_task = asyncio.create_task(start_health_server(port=health_port))
+    logger.info(f"Health server starting on port {health_port}")
+    
     # Initialize RAG pipeline
     logger.info("Initializing RAG pipeline...")
     rag_pipeline = RAGPipeline()
@@ -128,11 +133,6 @@ async def async_main():
         docs_dir = Path(__file__).parent / "docs"
         scheduler = setup_scheduler(bot, rag_pipeline, docs_dir)
         scheduler.start()
-    
-    # Start health server in background
-    health_port = int(os.getenv("HEALTH_PORT", "8080"))
-    health_task = asyncio.create_task(start_health_server(port=health_port))
-    logger.info(f"Health server starting on port {health_port}")
     
     try:
         # Start the bot

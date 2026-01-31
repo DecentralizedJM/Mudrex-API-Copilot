@@ -43,6 +43,26 @@ I'm your **Mudrex API copilot**. You can:
 
 Just mention me or reply to my messages to get started."""
 
+# Warning to append when user has shared their API secret in the chat
+API_KEY_EXPOSED_WARNING = (
+    "⚠️ **Your API key is now exposed.** Please rotate or revoke it immediately at "
+    "https://trade.mudrex.com (API keys section). Do not use this key anymore."
+)
+
+
+def _user_shared_api_secret(message: str) -> bool:
+    """Return True if the message looks like the user pasted their API secret (e.g. 'my API secret is X')."""
+    if not message or len(message) < 10:
+        return False
+    lower = message.lower()
+    # Patterns that suggest they shared the key: "api secret is", "api key is", "my api secret", "secret is"
+    if "api secret is" in lower or "api key is" in lower:
+        return True
+    if "my api secret" in lower or "my api key" in lower:
+        # Likely shared if there's more text after (the key or "help me connect")
+        return True
+    return False
+
 
 class RateLimiter:
     """Simple rate limiter for group messages"""
@@ -790,8 +810,12 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
                     logger.error(f"Fallback also failed: {fallback_error}", exc_info=True)
                     raise  # Re-raise to be caught by outer handler
             
+            # If user shared their API secret in the message, append exposure warning
+            answer = result['answer']
+            if _user_shared_api_secret(cleaned_message) and "API key is now exposed" not in answer:
+                answer = f"{answer}\n\n{API_KEY_EXPOSED_WARNING}"
             # Send response
-            await self._send_response(update, result['answer'])
+            await self._send_response(update, answer)
             
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)

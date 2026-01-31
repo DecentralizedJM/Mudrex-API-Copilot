@@ -103,7 +103,12 @@ class GeminiClient:
 - Current API = `https://trade.mudrex.com/fapi/v1` only.
 - Don't claim endpoints exist unless in current docs.
 - If asked about legacy endpoints: "Couldn't find that. Docs: https://docs.trade.mudrex.com — @DecentralizedJM can help."
-- Never mention "legacy" to users."""
+- Never mention "legacy" to users.
+
+## WHEN USER SHARES API SECRET
+- If the user's message contains what looks like a shared API secret (e.g. they pasted their key or said "my API secret is ..." or "api key is ..."), you MUST end your response with this warning (include it verbatim):
+  "⚠️ **Your API key is now exposed.** Please rotate or revoke it immediately at https://trade.mudrex.com (API keys section). Do not use this key anymore."
+- Give the connection/code help first, then add this warning. Do not skip the warning when they have shared their key."""
     
     def __init__(self):
         """Initialize Gemini client with NEW SDK"""
@@ -120,122 +125,6 @@ class GeminiClient:
         self.cache = RedisCache() if (config.REDIS_ENABLED and RedisCache) else None
         
         logger.info(f"Initialized Gemini client (new SDK): {self.model_name}")
-    
-    def is_api_related_query(self, message: str) -> bool:
-        """
-        Determine if a message is API-related and worth responding to
-        
-        Args:
-            message: User message
-            
-        Returns:
-            True if the message deserves a response
-        """
-        message_lower = message.lower().strip()
-        
-        # LOG DETECTION (High Priority)
-        # Check for common log patterns
-        log_patterns = [
-            r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}',  # Timestamp YYYY-MM-DD HH:MM:SS
-            r'\[(ERROR|WARNING|INFO|DEBUG|CRITICAL)\]',  # Log levels [ERROR]
-            r'Traceback \(most recent call last\)',  # Python traceback
-            r'Exception:',  # Exception
-            r'Error:',  # Generic error
-            r'Telegram API Error:',  # Telegram specific
-            r'Rate limited, retrying',  # Bot specific log
-            r'bot_log\.txt',  # Filenames in paste
-        ]
-        
-        for pattern in log_patterns:
-            if re.search(pattern, message, re.IGNORECASE):
-                logger.info("Log pattern detected in message")
-                return True
-        
-        # FILTER CHIT-CHAT (Strict Mode)
-        # We ignore pure greetings unless they have substance
-        # "Hi" -> Ignore (if not tagged)
-        # "Hi, help me" -> Respond
-        
-        # Very short messages that aren't questions - ignore
-        if len(message_lower) < 5:
-            return False
-            
-        # Code detection - always respond to code
-        code_patterns = [
-            r'```',  # Code blocks
-            r'`[^`]+`',  # Inline code
-            r'def\s+\w+',  # Python functions
-            r'class\s+\w+',  # Python classes
-            r'import\s+\w+',  # Python imports
-            r'from\s+\w+\s+import',  # Python from imports
-            r'async\s+def',  # Async functions
-            r'await\s+',  # Await calls
-            r'function\s+\w+',  # JS functions
-            r'const\s+\w+\s*=',  # JS const
-            r'let\s+\w+\s*=',  # JS let
-            r'requests\.',  # Python requests
-            r'fetch\(',  # JS fetch
-            r'axios\.',  # Axios
-            r'\.get\(|\.post\(|\.put\(|\.delete\(',  # HTTP methods
-            r'X-Authentication',  # Mudrex auth header
-        ]
-        
-        for pattern in code_patterns:
-            if re.search(pattern, message, re.IGNORECASE):
-                return True
-        
-        # HTTP status codes and Mudrex error codes (High Priority for troubleshooting)
-        http_status_patterns = [
-            r'\b[45]\d{2}\b',       # 4xx and 5xx errors (404, 500, 401, etc.)
-            r'-\d{4}\b',            # Mudrex error codes like -1121, -1022
-            r'\bnot working\b',     # Common troubleshooting phrase
-            r'\bfailed\b',          # Connection/request failed
-            r'\btimeout\b',         # Timeout errors
-        ]
-        
-        for pattern in http_status_patterns:
-            if re.search(pattern, message, re.IGNORECASE):
-                logger.info("HTTP status or error pattern detected")
-                return True
-        
-        # API and trading keywords
-        # STRONG keywords (sufficient alone when msg length > 5)
-        strong_keywords = [
-            'mudrex', 'fapi', 'api', 'endpoint', 'end point', 'webhook', 'websocket', 'mcp',
-            'x-authentication', 'auth', 'token', 'secret', 'jwt', 'key',
-            'btc', 'eth', 'usdt', 'futures', 'perpetual',
-            'rest', 'trade.mudrex.com', 'fapi/v1', 'http', 'https',
-            # Trade ideas / signals (community_resources.md)
-            'trade ideas', 'signals', 'signal',
-            # Rate limits
-            'rate limit', 'rate limits', 'limits', 'daily limit', 'minute limit',
-            # Troubleshooting keywords
-            'status', 'response', 'connection', 'broken', 'issue', 'debug',
-            'unauthorized', 'forbidden', 'invalid',
-            # Error-related (moved from weak - these are clearly API help requests)
-            'error', 'errors', 'bug', 'fix', 'help',
-            # URL and dashboard keywords
-            'url', 'dashboard', 'web url', 'website', 'access url', 'www.mudrex.com'
-        ]
-        
-        # WEAK keywords (need 2+ when no STRONG, to reduce false positives)
-        weak_keywords = [
-            'price', 'order', 'trade', 'position', 'balance', 'margin',
-            'leverage', 'liquidation', 'profit', 'loss', 'buy', 'sell',
-            'long', 'short', 'market', 'limit', 'stop',
-            'code', 'python', 'javascript', 'rate', 'latency',
-            'request', 'header', 'body', 'json', 'data'
-        ]
-        
-        strong_count = sum(1 for kw in strong_keywords if kw in message_lower)
-        weak_count = sum(1 for kw in weak_keywords if kw in message_lower)
-        
-        # LOGIC: Any STRONG -> Pass. Otherwise 2+ WEAK -> Pass.
-        if strong_count >= 1:
-            return True
-        if weak_count >= 2:
-            return True
-        return False
 
     def classify_query_domain(self, query: str) -> str:
         """

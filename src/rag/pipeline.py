@@ -129,6 +129,16 @@ class RAGPipeline:
                 "is_relevant": True,
             }
 
+        # 2.4b. "What to do with my API key" / "guide me" — Mudrex auth only (no HMAC)
+        api_key_usage = self.gemini_client._get_api_key_usage_response(question)
+        if api_key_usage:
+            logger.info("Using template response for API key usage")
+            return {
+                "answer": api_key_usage,
+                "sources": [{"filename": "Authentication (API key usage)", "similarity": 1.0}],
+                "is_relevant": True,
+            }
+
         # 2.5. Get enhanced context (if context manager available)
         enhanced_context = None
         semantic_memories = []

@@ -223,6 +223,8 @@ This is a shared service account — public data only. No personal balances or o
             'rest', 'trade.mudrex.com', 'fapi/v1', 'http', 'https',
             # Trade ideas / signals (community_resources.md)
             'trade ideas', 'signals', 'signal',
+            # Rate limits
+            'rate limit', 'rate limits', 'limits', 'daily limit', 'minute limit',
             # Troubleshooting keywords
             'status', 'response', 'connection', 'broken', 'issue', 'debug',
             'unauthorized', 'forbidden', 'invalid',
@@ -912,6 +914,32 @@ Return ONLY the transformed query, nothing else."""
         
         return None
     
+    def _get_api_key_usage_response(self, query: str) -> Optional[str]:
+        """
+        When user asks what to do with their API key / how to use it / guide me,
+        return Mudrex-specific auth (X-Authentication only, no HMAC).
+        """
+        q = query.lower()
+        key_phrases = ('key', 'keys', 'api key', 'api secret', 'secret')
+        help_phrases = ('what to do', 'how to use', 'guide me', 'don\'t know what to do', 'generated the key', 'generated the keys', 'help me', 'get started', 'getting started')
+        if not any(p in q for p in key_phrases):
+            return None
+        if not any(p in q for p in help_phrases):
+            return None
+        return (
+            "Mudrex uses **only one header**: `X-Authentication` with your API secret. "
+            "No HMAC, no signing, no timestamps.\n\n"
+            "**Base URL:** `https://trade.mudrex.com/fapi/v1`\n\n"
+            "**Minimal example (Python):**\n"
+            "```python\n"
+            "import requests\n"
+            "r = requests.get(\"https://trade.mudrex.com/fapi/v1/wallet/funds\", "
+            "headers={\"X-Authentication\": \"your_api_secret\"})\n"
+            "print(r.json())\n"
+            "```\n\n"
+            "Docs: https://docs.trade.mudrex.com/docs/authentication-rate-limits"
+        )
+    
     def generate_response_with_context_search(
         self,
         query: str,
@@ -938,6 +966,12 @@ Return ONLY the transformed query, nothing else."""
         if template_response:
             logger.info("Using template response for missing feature")
             return template_response
+        
+        # "What to do with my API key" — return Mudrex auth (no HMAC)
+        api_key_response = self._get_api_key_usage_response(query)
+        if api_key_response:
+            logger.info("Using template response for API key usage")
+            return api_key_response
         
         # Build prompt with low-similarity docs (if any)
         prompt = self._build_prompt(query, low_similarity_docs, chat_history, mcp_context)
@@ -991,6 +1025,11 @@ Return ONLY the transformed query, nothing else."""
         template_response = self._get_missing_feature_response(query)
         if template_response:
             return template_response
+        
+        # "What to do with my API key" — return Mudrex auth (no HMAC)
+        api_key_response = self._get_api_key_usage_response(query)
+        if api_key_response:
+            return api_key_response
         
         # Build context-aware prompt
         parts = []

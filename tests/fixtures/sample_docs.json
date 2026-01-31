@@ -1,0 +1,53 @@
+{
+  "documents": [
+    {
+      "content": "# Authentication\n\nThe Mudrex API uses a simple authentication mechanism. Include your API secret in the `X-Authentication` header.\n\n## Example\n```\nX-Authentication: your_api_secret\n```\n\nNo HMAC, SHA256, or signing is required. Just the header.",
+      "metadata": {
+        "filename": "authentication.md",
+        "section": "authentication"
+      }
+    },
+    {
+      "content": "# Orders\n\n## Place Market Order\n\nEndpoint: `POST /fapi/v1/order`\n\n### Parameters\n- `symbol` (required): Trading pair, e.g., BTCUSDT\n- `side` (required): BUY or SELL\n- `type` (required): MARKET\n- `quantity` (required): Order quantity\n\n### Example\n```python\nimport requests\n\nresponse = requests.post(\n    'https://trade.mudrex.com/fapi/v1/order',\n    headers={'X-Authentication': 'your_secret'},\n    json={'symbol': 'BTCUSDT', 'side': 'BUY', 'type': 'MARKET', 'quantity': 0.01}\n)\n```",
+      "metadata": {
+        "filename": "orders.md",
+        "section": "market_order"
+      }
+    },
+    {
+      "content": "# Positions\n\n## Get Open Positions\n\nEndpoint: `GET /fapi/v1/positions`\n\nReturns all open positions for the authenticated user.\n\n### Response\n```json\n[\n  {\n    \"symbol\": \"BTCUSDT\",\n    \"side\": \"LONG\",\n    \"quantity\": 0.01,\n    \"entryPrice\": 50000,\n    \"unrealizedPnl\": 100\n  }\n]\n```",
+      "metadata": {
+        "filename": "positions.md",
+        "section": "get_positions"
+      }
+    },
+    {
+      "content": "# Rate Limits\n\nThe Mudrex API enforces rate limits to ensure fair usage.\n\n## Limits\n- **Requests**: 2 requests per second\n- **Orders**: 10 orders per second\n\n## Exceeding Limits\nExceeding the rate limit will result in HTTP 429 (Too Many Requests) error.\n\n## Best Practices\n- Implement exponential backoff\n- Cache responses when possible\n- Use batch endpoints where available",
+      "metadata": {
+        "filename": "rate_limits.md",
+        "section": "limits"
+      }
+    },
+    {
+      "content": "# Getting Started\n\n## Base URL\n\nAll API calls should be made to:\n```\nhttps://trade.mudrex.com/fapi/v1\n```\n\n## Prerequisites\n1. Create a Mudrex account\n2. Generate an API key from the dashboard\n3. Store your API secret securely\n\n## Quick Start\n```python\nimport requests\n\nBASE_URL = 'https://trade.mudrex.com/fapi/v1'\nheaders = {'X-Authentication': 'your_api_secret'}\n\n# Get account info\nresponse = requests.get(f'{BASE_URL}/account', headers=headers)\nprint(response.json())\n```",
+      "metadata": {
+        "filename": "getting_started.md",
+        "section": "base_url"
+      }
+    }
+  ],
+  "test_queries": [
+    {
+      "query": "How do I authenticate with the Mudrex API?",
+      "expected_topic": "authentication"
+    },
+    {
+      "query": "How to place a market order?",
+      "expected_topic": "orders"
+    },
+    {
+      "query": "What are the rate limits?",
+      "expected_topic": "rate_limits"
+    }
+  ]
+}

@@ -37,7 +37,13 @@ class Config:
     GEMINI_TEMPERATURE: float = 0.4  # Slightly creative but focused
     GEMINI_MAX_TOKENS: int = 800  # Reduced for concise responses
     
-    # Vector Store
+    # Vector Store - Qdrant Cloud (Production-grade)
+    QDRANT_URL: str = ""  # Qdrant Cloud URL (e.g., https://xxx.qdrant.io)
+    QDRANT_API_KEY: str = ""  # Qdrant Cloud API key
+    QDRANT_COLLECTION_NAME: str = "mudrex_api_docs"
+    QDRANT_VECTOR_SIZE: int = 768  # Gemini embedding dimension
+    
+    # Legacy - kept for migration
     CHROMA_PERSIST_DIR: str = "./data/chroma"
     CHROMA_COLLECTION_NAME: str = "mudrex_api_docs"
     
@@ -131,7 +137,13 @@ class Config:
             GEMINI_TEMPERATURE=float(os.getenv("GEMINI_TEMPERATURE", "0.4")),
             GEMINI_MAX_TOKENS=int(os.getenv("GEMINI_MAX_TOKENS", "2048")),
             
-            # Vector Store
+            # Vector Store - Qdrant Cloud
+            QDRANT_URL=os.getenv("QDRANT_URL", ""),
+            QDRANT_API_KEY=os.getenv("QDRANT_API_KEY", ""),
+            QDRANT_COLLECTION_NAME=os.getenv("QDRANT_COLLECTION_NAME", "mudrex_api_docs"),
+            QDRANT_VECTOR_SIZE=int(os.getenv("QDRANT_VECTOR_SIZE", "768")),
+            
+            # Legacy - kept for migration
             CHROMA_PERSIST_DIR=os.getenv("CHROMA_PERSIST_DIR", "./data/chroma"),
             CHROMA_COLLECTION_NAME=os.getenv("CHROMA_COLLECTION_NAME", "mudrex_api_docs"),
             

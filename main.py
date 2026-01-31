@@ -21,21 +21,20 @@ from src.bot import MudrexBot
 from src.mcp import MudrexMCPClient
 from src.tasks.scheduler import setup_scheduler
 from src.lib.error_reporter import report_error_sync, report_error
+from src.health import set_components, start_health_server
+from src.lib.metrics import init_service_info, update_documents_count
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('bot.log')
-    ]
+# Configure structured logging
+from src.lib.logging import configure_logging, get_logger
+
+# Use JSON format in production, colored console in development
+is_production = os.getenv("RAILWAY_ENVIRONMENT") == "production"
+configure_logging(
+    log_level=os.getenv("LOG_LEVEL", "INFO"),
+    json_format=is_production,
 )
 
-# SECURITY: Suppress verbose httpx logs to prevent token exposure
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def validate_config():
@@ -112,12 +111,28 @@ async def async_main():
     logger.info("Initializing Telegram bot...")
     bot = MudrexBot(rag_pipeline, mcp_client)
     
+    # Set components for health checks
+    set_components(rag_pipeline=rag_pipeline, mcp_client=mcp_client, bot=bot)
+    
+    # Initialize metrics
+    init_service_info(
+        version="2.0.0",
+        model=config.GEMINI_MODEL,
+        environment=os.getenv("RAILWAY_ENVIRONMENT", "development")
+    )
+    update_documents_count(stats['total_documents'])
+    
     # Scheduler for daily changelog scrape + ingest + broadcast
     scheduler = None
     if config.ENABLE_CHANGELOG_WATCHER:
         docs_dir = Path(__file__).parent / "docs"
         scheduler = setup_scheduler(bot, rag_pipeline, docs_dir)
         scheduler.start()
+    
+    # Start health server in background
+    health_port = int(os.getenv("HEALTH_PORT", "8080"))
+    health_task = asyncio.create_task(start_health_server(port=health_port))
+    logger.info(f"Health server starting on port {health_port}")
     
     try:
         # Start the bot
@@ -127,6 +142,7 @@ async def async_main():
         logger.info("")
         logger.info("=" * 60)
         logger.info("  Bot is LIVE! Press Ctrl+C to stop.")
+        logger.info(f"  Health endpoint: http://localhost:{health_port}/health")
         logger.info("=" * 60)
         logger.info("")
         

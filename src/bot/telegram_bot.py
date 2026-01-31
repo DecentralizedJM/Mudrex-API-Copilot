@@ -553,11 +553,14 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
-        Handle incoming messages in groups
-        Responds when:
-        1. Bot is mentioned/tagged (always)
-        2. Message is clearly API-related (smart detection)
-        Ignores off-topic messages when not tagged
+        Handle incoming messages in groups - REACTIVE ONLY
+        
+        Responds ONLY when explicitly engaged:
+        1. Bot is @mentioned directly
+        2. Reply to bot's message (conversation continuation)
+        3. Quote + mention (someone quotes another user's message AND tags bot)
+        
+        Does NOT auto-detect keywords or respond proactively.
         """
         if not update.message or not update.message.text:
             return
@@ -572,54 +575,67 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         user_name = update.effective_user.first_name
         message = update.message.text
         
-        # Check if bot is mentioned/tagged or replied to
-        bot_mentioned = self._is_bot_mentioned(update)
+        # Check if bot is @mentioned in this message (direct tag)
+        bot_mentioned = self._is_bot_mentioned_direct(update)
         
-        # Check if this is a reply to the bot's message (continuation - always process)
+        # Check if this is a reply to the bot's own message (continuation)
         is_reply_to_bot = (
             update.message.reply_to_message and 
             update.message.reply_to_message.from_user and 
-            update.message.reply_to_message.from_user.is_bot
+            update.message.reply_to_message.from_user.is_bot and
+            self.app.bot and
+            update.message.reply_to_message.from_user.id == self.app.bot.id
         )
         
-        # Strip bot @mention from the message before intent detection so
-        # "hello @API_Assistant_V2_bot" is treated as a greeting, not an API query.
+        # Quote + mention: User replies to ANOTHER user's message AND tags the bot
+        # This is how admins/peers can ask the bot to help with someone else's question
+        is_quote_with_mention = (
+            update.message.reply_to_message and
+            update.message.reply_to_message.from_user and
+            not update.message.reply_to_message.from_user.is_bot and
+            bot_mentioned
+        )
+        
+        # REACTIVE ONLY: Respond ONLY when explicitly engaged
+        # 1. Bot is @mentioned
+        # 2. Reply to bot's message (continuation)
+        # 3. Quote + mention (someone quotes another user and tags bot)
+        if not bot_mentioned and not is_reply_to_bot:
+            logger.debug(f"Not engaged, ignoring message from {user_name}")
+            return
+        
+        # Strip bot @mention from the message for processing
         cleaned_message = message
         if self.app.bot and self.app.bot.username:
             try:
                 pattern = re.compile(rf"@{re.escape(self.app.bot.username)}\b", re.IGNORECASE)
                 cleaned_message = pattern.sub("", message).strip()
             except re.error:
-                # If regex compilation fails for some reason, fall back to original message
                 cleaned_message = message.strip()
         else:
             cleaned_message = message.strip()
         
+        # For quote+mention: include the quoted message for context
+        if is_quote_with_mention and update.message.reply_to_message.text:
+            quoted_text = update.message.reply_to_message.text
+            # If user just tagged bot without adding their own question, use the quoted message
+            if not cleaned_message or cleaned_message.lower() in ['help', 'please', 'can you help', '?']:
+                cleaned_message = quoted_text
+            else:
+                # Prepend quoted context so the bot knows what they're asking about
+                cleaned_message = f"[Quoted message: {quoted_text}]\n\nUser's question: {cleaned_message}"
+        
         # Handle empty message after stripping mention (just a tag with no content)
-        if bot_mentioned and not is_reply_to_bot and not cleaned_message:
+        if not cleaned_message:
             await update.message.reply_text(
-                "Hey! What do you need help with? Ask me about the API, endpoints, errors, or code examples."
+                "Hey! What's up? Ask me about the API, code, or errors."
             )
             return
         
         # Lightweight handling for pure greetings when tagged (no RAG, no Gemini call)
-        if bot_mentioned and not is_reply_to_bot:
-            lower_clean = cleaned_message.lower()
-            if re.fullmatch(r"(hi|hello|hey|yo|gm|gn)[\s!,.]*", lower_clean):
-                brief = self.rag_pipeline.gemini_client.get_brief_response("greeting")
-                await update.message.reply_text(brief)
-                return
-        
-        # Check if message is API-related (after stripping the bot mention)
-        is_api_related = self.rag_pipeline.gemini_client.is_api_related_query(cleaned_message)
-        
-        # Respond if:
-        # 1. Reply to bot's message (always respond - conversation continuation)
-        # 2. Bot is mentioned/tagged (always respond)
-        # 3. Message is clearly API-related (smart detection)
-        # Otherwise, silently ignore
-        if not is_reply_to_bot and not bot_mentioned and not is_api_related:
-            logger.debug(f"Not mentioned and not API-related, ignoring message from {user_name}")
+        lower_clean = cleaned_message.lower()
+        if re.fullmatch(r"(hi|hello|hey|yo|gm|gn|sup|what'?s up)[\s!,.?]*", lower_clean):
+            await update.message.reply_text("Hey! What's up? Ask me about the API, code, or errors.")
             return
         
         # Access control (if configured)
@@ -634,15 +650,8 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             )
             return
         
-        logger.info(f"Group message from {user_name} in {chat_id}: {message[:50]}... | reply_to_bot={is_reply_to_bot} | mentioned={bot_mentioned} | api_related={is_api_related}")
+        logger.info(f"[REACTIVE] {user_name} in {chat_id}: {message[:50]}... | reply_to_bot={is_reply_to_bot} | mentioned={bot_mentioned} | quote_mention={is_quote_with_mention}")
         
-        # If tagged (not reply) and not API-related, ask for specific details
-        # But if it's a reply to the bot, always process it (continuation)
-        if bot_mentioned and not is_reply_to_bot and not is_api_related:
-            await update.message.reply_text(
-                "I can only help with Mudrex API questions — auth, endpoints, errors, or code examples. Ask me something like that and I’ll do my best."
-            )
-            return
         
         await update.message.chat.send_action(ChatAction.TYPING)
         
@@ -779,6 +788,37 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         
         # Check if bot username appears in text (case-insensitive)
         if self.app.bot.username:
+            if f"@{self.app.bot.username.lower()}" in update.message.text.lower():
+                return True
+        
+        return False
+    
+    def _is_bot_mentioned_direct(self, update: Update) -> bool:
+        """
+        Check if bot is @mentioned directly in this message.
+        Does NOT count replies to bot's messages as mentions.
+        
+        Returns True ONLY if:
+        - Bot is @mentioned in the message text
+        - Bot username appears in the message
+        """
+        if not update.message or not update.message.text:
+            return False
+        
+        # Check for @mentions in entities
+        if update.message.entities:
+            bot_username = self.app.bot.username.lower() if self.app.bot.username else None
+            for entity in update.message.entities:
+                if entity.type == "mention":
+                    mention = update.message.text[entity.offset:entity.offset + entity.length].lower()
+                    if bot_username and bot_username in mention:
+                        return True
+                elif entity.type == "text_mention":
+                    if entity.user and self.app.bot and entity.user.id == self.app.bot.id:
+                        return True
+        
+        # Check if bot username appears in text (case-insensitive)
+        if self.app.bot and self.app.bot.username:
             if f"@{self.app.bot.username.lower()}" in update.message.text.lower():
                 return True
         

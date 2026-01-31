@@ -12,11 +12,12 @@ from typing import Optional, Dict, Tuple, List
 from collections import defaultdict
 import time
 
-from telegram import Update, BotCommand
+from telegram import Update, BotCommand, ChatMember
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    ChatMemberHandler,
     filters,
     ContextTypes
 )
@@ -30,6 +31,17 @@ from ..tasks.futures_listing_watcher import fetch_all_futures_symbols, fetch_all
 from ..lib.error_reporter import report_error
 
 logger = logging.getLogger(__name__)
+
+# Intro message when bot is added to a group
+GROUP_INTRO_MESSAGE = """Hi community! 👋
+
+I'm your **Mudrex API copilot**. You can:
+• Ask me questions about the API — auth, endpoints, errors, code examples
+• Tag me with @ when you need help in the group
+• Use /help to see what I can do
+• Use /endpoints for API endpoints, /listfutures for futures count
+
+Just mention me or reply to my messages to get started."""
 
 
 class RateLimiter:
@@ -104,6 +116,11 @@ class MudrexBot:
             )
         )
         
+        # Bot added to a group — send intro
+        self.app.add_handler(
+            ChatMemberHandler(self.on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER)
+        )
+
         # Reject DMs
         self.app.add_handler(
             MessageHandler(
@@ -246,6 +263,45 @@ class MudrexBot:
         except Exception as e:
             logger.error(f"File upload error: {e}")
             await status_msg.edit_text("Something went wrong processing the file.")
+
+    async def on_my_chat_member(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """When the bot is added to a group, send an intro message."""
+        result = update.my_chat_member
+        if not result or not context.bot:
+            return
+        chat = result.chat
+        if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+            return
+        # Only react when *our* bot was added (not some other chat_member update)
+        if result.new_chat_member.user.id != context.bot.id:
+            return
+        diff = result.difference()
+        status_change = diff.get("status")
+        if not status_change:
+            return
+        old_status, new_status = status_change
+        was_member = old_status in (
+            ChatMember.MEMBER,
+            ChatMember.OWNER,
+            ChatMember.ADMINISTRATOR,
+        ) or (old_status == ChatMember.RESTRICTED and diff.get("is_member", (None, None))[0] is True)
+        is_member = new_status in (
+            ChatMember.MEMBER,
+            ChatMember.OWNER,
+            ChatMember.ADMINISTRATOR,
+        ) or (new_status == ChatMember.RESTRICTED and diff.get("is_member", (None, None))[1] is True)
+        if was_member or not is_member:
+            return
+        try:
+            await context.bot.send_message(
+                chat_id=chat.id,
+                text=GROUP_INTRO_MESSAGE,
+                parse_mode=ParseMode.MARKDOWN,
+                disable_web_page_preview=True,
+            )
+            logger.info(f"Sent group intro to chat {chat.id} ({chat.title})")
+        except Exception as e:
+            logger.warning(f"Could not send group intro to {chat.id}: {e}")
 
     async def setup_commands(self):
         """Set up bot commands menu"""

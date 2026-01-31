@@ -591,11 +591,15 @@ class VectorStore:
             logger.error("Qdrant not configured. Set QDRANT_URL and QDRANT_API_KEY")
             return False
         
+        # Pickle path (db_file may not be set when initialized with Qdrant)
+        pickle_path = getattr(self, 'db_file', None) or Path(config.CHROMA_PERSIST_DIR) / "vectors.pkl"
+        
         # Load pickle data
-        if not self.db_file.exists():
+        if not pickle_path.exists():
             logger.warning("No pickle database to export")
             return False
         
+        self.db_file = pickle_path
         self._load_pickle_db()
         
         if not self.documents:

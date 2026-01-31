@@ -19,7 +19,9 @@ class Config:
     
     # Required - Telegram
     TELEGRAM_BOT_TOKEN: str = ""
-    
+    # Telegram group chat ID (e.g. -1001234567890) — for intro script / Railway; add your group here
+    TELEGRAM_GROUP_CHAT_ID: Optional[int] = None
+
     # Required - Gemini AI
     GEMINI_API_KEY: str = ""
     
@@ -106,11 +108,16 @@ class Config:
         admin_ids = None
         if admin_users:
             admin_ids = [int(uid.strip()) for uid in admin_users.split(",") if uid.strip()]
+
+        # Optional: single group chat ID (for intro script, Railway env)
+        group_chat = os.getenv("TELEGRAM_GROUP_CHAT_ID")
+        group_chat_id = int(group_chat.strip()) if group_chat and group_chat.strip() else None
         
         return cls(
             # Required
             TELEGRAM_BOT_TOKEN=os.getenv("TELEGRAM_BOT_TOKEN", ""),
             GEMINI_API_KEY=os.getenv("GEMINI_API_KEY", ""),
+            TELEGRAM_GROUP_CHAT_ID=group_chat_id,
             
             # Mudrex API Secret (Your Personal Key)
             MUDREX_API_SECRET=os.getenv("MUDREX_API_SECRET") or os.getenv("MUDREX_BOT_KEY"),

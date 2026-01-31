@@ -890,6 +890,11 @@ Return ONLY the transformed query, nothing else."""
             'trade ideas': "There’s no trade-ideas endpoint on the Mudrex trade API. For signals, use the community broadcaster: when signals are published, a WebSocket streams them. Install the SDK to receive and execute them: https://github.com/DecentralizedJM/TIA-Service-Broadcaster",
             'signals': "There’s no signals endpoint on the Mudrex trade API. For trade ideas/signals, use the community broadcaster — when signals are published, a WebSocket streams them. Install the SDK to receive and execute: https://github.com/DecentralizedJM/TIA-Service-Broadcaster",
             'signal': "For trade ideas/signals, use the community broadcaster — WebSocket streams when signals are published. Install the SDK to receive and execute: https://github.com/DecentralizedJM/TIA-Service-Broadcaster",
+            # SDK / library — community Python SDK
+            'sdk': "There's a community-built Python SDK that makes onboarding easier: https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk — supports 500+ pairs, symbol-first trading, MCP, and handles auth for you.",
+            'python sdk': "Try the community Python SDK: https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk — symbol-first trading, 500+ pairs, built-in MCP support.",
+            'client library': "Check out the community Python SDK: https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk — handles auth, pagination, and has MCP support.",
+            'library': "There's a community Python SDK: https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk — makes trading easier with symbol-first orders and built-in MCP.",
         }
         
         for keyword, response in missing_features.items():
@@ -921,6 +926,8 @@ Return ONLY the transformed query, nothing else."""
             "headers={\"X-Authentication\": \"your_api_secret\"})\n"
             "print(r.json())\n"
             "```\n\n"
+            "**Easier option:** Use the community Python SDK — handles auth for you:\n"
+            "https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk\n\n"
             "Docs: https://docs.trade.mudrex.com/docs/authentication-rate-limits"
         )
     

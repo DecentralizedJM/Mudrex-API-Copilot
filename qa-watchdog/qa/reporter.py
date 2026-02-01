@@ -55,6 +55,15 @@ Issues:"""
         
         return alert
     
+    def format_critical_run_summary(self, results: list[GradeResult]) -> str:
+        """Format end-of-run summary for critical tests (plain text)"""
+        passed = sum(1 for r in results if r.passed)
+        failed = len(results) - passed
+        total = len(results)
+        if failed == 0:
+            return f"✅ Critical tests complete: {passed}/{total} passed"
+        return f"⚠️ Critical tests: {passed} passed, {failed} failed. See failure alerts above."
+
     def format_timeout_alert(self, result: GradeResult) -> str:
         """Format a timeout alert"""
         return f"""🚨 *QA Alert: Response Timeout*

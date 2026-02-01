@@ -262,7 +262,14 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
                 
                 if i < len(tests):
                     await asyncio.sleep(self.config.TEST_INTERVAL)
-            
+
+            # Post end-of-run summary
+            summary_msg = self.reporter.format_critical_run_summary(results)
+            await self.bot.send_message(
+                chat_id=self.config.QA_TEST_GROUP_ID,
+                text=summary_msg,
+            )
+
             return results
             
         finally:
@@ -308,7 +315,7 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
             # DIRECT API: Telegram doesn't deliver bot-to-bot messages
             if self.config.COPILOT_QA_URL:
                 logger.info(f"Using direct API for test {test_case.id}")
-                result = await self._run_via_api(test_case, sent_time)
+                result = await self._run_via_api(test_case, sent_time, reply_to_message_id=sent_message.message_id)
                 return result
             
             # TELEGRAM: Wait for reply (when user quotes or Copilot responds)
@@ -362,10 +369,25 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
                 self._response_events.pop(message_id, None)
                 self._responses.pop(message_id, None)
     
-    async def _run_via_api(self, test_case: TestCase, sent_time: float) -> GradeResult:
+    async def _run_via_api(self, test_case: TestCase, sent_time: float, reply_to_message_id: int | None = None) -> GradeResult:
         """Call Copilot API directly - Telegram doesn't deliver bot-to-bot messages"""
         import aiohttp
-        
+
+        async def _post_answer_to_group(answer: str) -> None:
+            """Post Copilot's answer to the group for visibility (as reply to Stalker's question)"""
+            if not answer or not reply_to_message_id:
+                return
+            try:
+                # Truncate long answers for Telegram (4096 char limit), plain text to avoid parse errors
+                text = answer[:3500] + "..." if len(answer) > 3500 else answer
+                await self.bot.send_message(
+                    chat_id=self.config.QA_TEST_GROUP_ID,
+                    text=f"📎 Copilot (API):\n\n{text}",
+                    reply_to_message_id=reply_to_message_id,
+                )
+            except Exception as e:
+                logger.warning(f"Could not post answer to group: {e}")
+
         base = self.config.COPILOT_QA_URL.strip().rstrip('/')
         if not base.startswith(('http://', 'https://')):
             base = f"https://{base}"
@@ -403,6 +425,7 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
                             score=0,
                             issues=["API returned empty answer"],
                         )
+                    await _post_answer_to_group(answer)
                     return self.grader.grade(test_case, answer, response_time)
         except asyncio.TimeoutError:
             return self.grader.grade_timeout(test_case, self.config.RESPONSE_TIMEOUT)

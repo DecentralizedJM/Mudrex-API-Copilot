@@ -1,12 +1,7 @@
 # Dockerfile for Mudrex API Bot
-# Production-grade with health checks and metrics
 FROM python:3.11-slim
 
 WORKDIR /app
-
-# Cache buster - change value to force full rebuild
-ARG CACHEBUST=1
-RUN echo "Build: $CACHEBUST"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -24,23 +19,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Create data directory for vector store (legacy fallback)
+# Create data directory
 RUN mkdir -p data/chroma
 
-# Copy startup script
-COPY start.sh /app/start.sh
+# Make startup script executable
 RUN chmod +x /app/start.sh
 
-# Expose health check port
-EXPOSE 8080
-
-# Environment variables
-ENV HEALTH_PORT=8080
+# Environment
 ENV PYTHONUNBUFFERED=1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/health/live || exit 1
-
-# Run the bot (startup script will auto-ingest docs if needed)
+# NO HEALTHCHECK - disable Railway health check in UI instead
 CMD ["/app/start.sh"]

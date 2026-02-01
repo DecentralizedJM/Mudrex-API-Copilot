@@ -1014,20 +1014,45 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             await self._send_response(update, answer)
             
         except Exception as e:
-            logger.error(f"Error handling message: {e}", exc_info=True)
+            error_type = type(e).__name__
+            error_msg_str = str(e)
+            logger.error(f"Error handling message: {error_type}: {error_msg_str}", exc_info=True)
             # Log more details for debugging
             import traceback
-            logger.error(f"Full traceback: {traceback.format_exc()}")
+            full_traceback = traceback.format_exc()
+            logger.error(f"Full traceback:\n{full_traceback}")
+            
+            # Log specific error types for better debugging
+            if "Conflict" in error_type or "conflict" in error_msg_str.lower():
+                logger.error("CONFLICT ERROR: Multiple bot instances detected. Stop other instances immediately.")
+            elif "Connection" in error_type or "timeout" in error_msg_str.lower():
+                logger.error("CONNECTION ERROR: Check Redis, Qdrant, or Gemini API connectivity")
+            elif "AttributeError" in error_type:
+                logger.error(f"ATTRIBUTE ERROR: {error_msg_str} - Check component initialization")
+            elif "KeyError" in error_type:
+                logger.error(f"KEY ERROR: {error_msg_str} - Missing configuration or data")
+            
             # Report to Station Master
             try:
-                await report_error(e, "exception", context={"handler": "handle_message", "message_preview": message[:100] if message else "no message"})
+                await report_error(e, "exception", context={
+                    "handler": "handle_message", 
+                    "message_preview": message[:100] if message else "no message",
+                    "error_type": error_type,
+                    "error_message": error_msg_str[:200]
+                })
             except Exception:
                 pass  # Don't let error reporting break the bot
             
             # Check if we can send a response (update might be None in some error cases)
             try:
                 if update and update.message:
-                    error_msg = "That didn't work — try again? If it keeps failing, might be a temporary issue."
+                    # More helpful error message based on error type
+                    if "Conflict" in error_type:
+                        error_msg = "⚠️ Multiple bot instances detected. Please stop other instances and try again."
+                    elif "Connection" in error_type or "timeout" in error_msg_str.lower():
+                        error_msg = "⚠️ Connection issue. Check Redis/Qdrant/Gemini connectivity. Try again in a moment."
+                    else:
+                        error_msg = f"That didn't work — try again? Error: {error_type}. If it keeps failing, might be a temporary issue."
                     await update.message.reply_text(error_msg)
             except Exception as send_error:
                 logger.error(f"Could not send error message to user: {send_error}")

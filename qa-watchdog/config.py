@@ -101,7 +101,7 @@ class Config:
             HEALTH_PORT=int(os.environ.get("PORT", os.environ.get("HEALTH_PORT", "8081"))),
             BOT_STARTUP_DELAY=int(os.environ.get("BOT_STARTUP_DELAY", "30")),
             RUN_QA_ON_STARTUP=os.environ.get("RUN_QA_ON_STARTUP", "").lower() in ("1", "true", "yes"),
-            COPILOT_QA_URL=os.environ.get("COPILOT_QA_URL") or None,
+            COPILOT_QA_URL=os.environ.get("COPILOT_QA_URL") or os.environ.get("COPILOT_URL") or None,
             QA_API_SECRET=os.environ.get("QA_API_SECRET") or None,
         )
     

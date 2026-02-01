@@ -111,6 +111,10 @@ async def main():
     logger.info("  QA Watchdog Bot is LIVE!")
     logger.info(f"  Test Group: {config.QA_TEST_GROUP_ID}")
     logger.info(f"  Copilot: @{config.COPILOT_BOT_USERNAME}")
+    if config.COPILOT_QA_URL:
+        logger.info(f"  Mode: DIRECT API ({config.COPILOT_QA_URL})")
+    else:
+        logger.info("  Mode: TELEGRAM (wait for reply) - set COPILOT_QA_URL for direct API")
     logger.info(f"  Health: http://localhost:{config.HEALTH_PORT}/health")
     logger.info("=" * 60)
     logger.info("")

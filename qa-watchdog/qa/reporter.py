@@ -32,27 +32,24 @@ class Reporter:
         self.admin_username = admin_username
     
     def format_failure_alert(self, result: GradeResult, report_path: Optional[Path] = None) -> str:
-        """Format a failure alert for Telegram"""
-        # Truncate response for Telegram
-        response_preview = result.response[:200] + "..." if len(result.response) > 200 else result.response
-        
-        alert = f"""⚠️ *QA Alert: Test Failed*
+        """Format a failure alert for Telegram (plain text to avoid parse errors)"""
+        q = result.test_case.question[:100] + ('...' if len(result.test_case.question) > 100 else '')
+        alert = f"""⚠️ QA Alert: Test Failed
 
-*Test:* `{result.test_case.id}`
-*Question:* _{result.test_case.question[:100]}{'...' if len(result.test_case.question) > 100 else ''}_
-*Category:* {result.test_case.category.title()} ({result.test_case.severity.upper()})
-*Score:* {result.score}/100
+Test: {result.test_case.id}
+Question: {q}
+Category: {result.test_case.category.title()} ({result.test_case.severity.upper()})
+Score: {result.score}/100
 
-*Issues:*
-"""
-        for issue in result.issues[:3]:  # Max 3 issues in alert
-            alert += f"• {issue}\n"
+Issues:"""
+        for issue in result.issues[:3]:
+            alert += f"\n• {issue}"
         
         if result.forbidden_found:
-            alert += f"\n*Forbidden phrases found:* {', '.join(result.forbidden_found)}"
+            alert += f"\n\nForbidden phrases found: {', '.join(result.forbidden_found)}"
         
         if report_path:
-            alert += f"\n\n📄 Full report: `{report_path.name}`"
+            alert += f"\n\n📄 Full report: {report_path.name}"
         
         alert += f"\n\n@{self.admin_username} please review"
         

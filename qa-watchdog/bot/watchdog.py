@@ -307,6 +307,7 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
             
             # DIRECT API: Telegram doesn't deliver bot-to-bot messages
             if self.config.COPILOT_QA_URL:
+                logger.info(f"Using direct API for test {test_case.id}")
                 result = await self._run_via_api(test_case, sent_time)
                 return result
             
@@ -373,11 +374,13 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
             headers["X-Api-Key"] = self.config.QA_API_SECRET
         
         try:
+            logger.info(f"Calling Copilot API: {url}")
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=self.config.RESPONSE_TIMEOUT)) as resp:
                     response_time = time.time() - sent_time
                     if resp.status != 200:
                         text = await resp.text()
+                        logger.warning(f"API returned {resp.status}: {text[:200]}")
                         return GradeResult(
                             test_case=test_case,
                             response=f"[API {resp.status}]: {text[:500]}",
@@ -402,7 +405,7 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
             return self.grader.grade_timeout(test_case, self.config.RESPONSE_TIMEOUT)
         except Exception as e:
             response_time = time.time() - sent_time
-            logger.error(f"API call failed for {test_case.id}: {e}")
+            logger.error(f"API call failed for {test_case.id}: {e}", exc_info=True)
             return GradeResult(
                 test_case=test_case,
                 response=f"[API ERROR: {str(e)}]",
@@ -424,7 +427,6 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
             await self.bot.send_message(
                 chat_id=self.config.QA_TEST_GROUP_ID,
                 text=alert,
-                parse_mode="Markdown"
             )
             
         except Exception as e:

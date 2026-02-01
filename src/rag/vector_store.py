@@ -389,30 +389,32 @@ class VectorStore:
             ]
             query_filter = models.Filter(must=conditions)
         
-        # Search Qdrant - use HTTP API directly (most reliable)
-        from qdrant_client.http import models as rest_models
-        
-        search_request = rest_models.SearchRequest(
-            vector=query_embedding,
-            filter=query_filter,
-            limit=top_k,
-            score_threshold=config.SIMILARITY_THRESHOLD,
-        )
-        
+        # Search Qdrant - use query method (available in all versions)
         try:
-            search_result = self.client.http.collections_api.search_points(
+            # Use the query method which is more universal
+            results = self.client.query_points(
                 collection_name=self.collection_name,
-                search_request=search_request
-            )
-            # Extract points from result (handle different response formats)
-            if hasattr(search_result, 'result'):
-                results = search_result.result.points if hasattr(search_result.result, 'points') else []
-            elif hasattr(search_result, 'points'):
-                results = search_result.points
-            else:
-                results = list(search_result) if search_result else []
+                query=query_embedding,
+                query_filter=query_filter,
+                limit=top_k,
+                score_threshold=config.SIMILARITY_THRESHOLD,
+                with_payload=True,
+            ).points
+        except AttributeError:
+            # Fallback: Try search method
+            try:
+                results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    query_filter=query_filter,
+                    limit=top_k,
+                    score_threshold=config.SIMILARITY_THRESHOLD,
+                )
+            except Exception as search_error:
+                logger.error(f"Qdrant search fallback error: {search_error}", exc_info=True)
+                results = []
         except Exception as e:
-            logger.error(f"Qdrant search error: {e}", exc_info=True)
+            logger.error(f"Qdrant query error: {e}", exc_info=True)
             results = []
         
         # Format results (handle both direct API and HTTP API response formats)
@@ -507,27 +509,28 @@ class VectorStore:
         query_embedding = self._get_embedding(query)
         
         if self.use_qdrant:
-            # Search with lower threshold using HTTP API
-            from qdrant_client.http import models as rest_models
-            
-            search_request = rest_models.SearchRequest(
-                vector=query_embedding,
-                limit=top_k,
-                score_threshold=min_threshold,
-            )
-            
+            # Search with lower threshold
             try:
-                search_result = self.client.http.collections_api.search_points(
+                # Use the query method which is more universal
+                results = self.client.query_points(
                     collection_name=self.collection_name,
-                    search_request=search_request
-                )
-                # Extract points from result
-                if hasattr(search_result, 'result'):
-                    results = search_result.result.points if hasattr(search_result.result, 'points') else []
-                elif hasattr(search_result, 'points'):
-                    results = search_result.points
-                else:
-                    results = list(search_result) if search_result else []
+                    query=query_embedding,
+                    limit=top_k,
+                    score_threshold=min_threshold,
+                    with_payload=True,
+                ).points
+            except AttributeError:
+                # Fallback: Try search method
+                try:
+                    results = self.client.search(
+                        collection_name=self.collection_name,
+                        query_vector=query_embedding,
+                        limit=top_k,
+                        score_threshold=min_threshold,
+                    )
+                except Exception as search_error:
+                    logger.error(f"Qdrant search_all_relevant fallback error: {search_error}", exc_info=True)
+                    results = []
             except Exception as e:
                 logger.error(f"Qdrant search_all_relevant error: {e}", exc_info=True)
                 results = []

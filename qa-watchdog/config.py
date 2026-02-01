@@ -87,7 +87,8 @@ class Config:
             SPOT_CHECK_COUNT=int(os.environ.get("SPOT_CHECK_COUNT", "2")),
             REPORTS_DIR=os.environ.get("REPORTS_DIR", "qa-watchdog/reports"),
             DATA_DIR=os.environ.get("DATA_DIR", "qa-watchdog/data"),
-            HEALTH_PORT=int(os.environ.get("HEALTH_PORT", "8081")),
+            # Railway injects PORT; use it so healthcheck works
+            HEALTH_PORT=int(os.environ.get("PORT", os.environ.get("HEALTH_PORT", "8081"))),
         )
     
     def validate(self) -> None:

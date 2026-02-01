@@ -366,7 +366,10 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
         """Call Copilot API directly - Telegram doesn't deliver bot-to-bot messages"""
         import aiohttp
         
-        url = f"{self.config.COPILOT_QA_URL.rstrip('/')}/api/qa-query"
+        base = self.config.COPILOT_QA_URL.strip().rstrip('/')
+        if not base.startswith(('http://', 'https://')):
+            base = f"https://{base}"
+        url = f"{base}/api/qa-query"
         payload = {"question": test_case.question}
         headers = {"Content-Type": "application/json"}
         if self.config.QA_API_SECRET:

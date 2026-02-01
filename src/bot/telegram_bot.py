@@ -960,8 +960,17 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             logger.warning(f"Unauthorized group: {chat_id}")
             return
         
-        # Rate limiting (per user + per group + global)
-        if not self.rate_limiter.is_allowed(chat_id, user_id):
+        # QA Watchdog / Stalker bot: always respond, bypass rate limit
+        is_qa_watchdog = False
+        if config.QA_WATCHDOG_BOT_USERNAME and update.effective_user:
+            sender_username = (update.effective_user.username or "").lower()
+            qa_username = config.QA_WATCHDOG_BOT_USERNAME.lower().lstrip("@")
+            if sender_username == qa_username:
+                is_qa_watchdog = True
+                logger.info(f"[QA] Responding to QA Watchdog (@{sender_username}) question")
+        
+        # Rate limiting (per user + per group + global) - skip for QA Watchdog
+        if not is_qa_watchdog and not self.rate_limiter.is_allowed(chat_id, user_id):
             remaining = self.rate_limiter.get_remaining(chat_id, user_id)
             if remaining.get("user", 1) == 0:
                 await update.message.reply_text(

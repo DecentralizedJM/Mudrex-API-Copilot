@@ -68,6 +68,29 @@ async def async_main():
     logger.info("Initializing RAG pipeline...")
     rag_pipeline = RAGPipeline()
     
+    # One-time migration: Pickle → Qdrant (if Qdrant is configured)
+    if config.QDRANT_URL and config.QDRANT_API_KEY:
+        logger.info("Qdrant configured - checking for migration...")
+        try:
+            # Check if we're using pickle (not Qdrant)
+            if not rag_pipeline.vector_store.use_qdrant:
+                logger.info("Currently using pickle storage - attempting migration to Qdrant...")
+                pickle_path = Path(config.CHROMA_PERSIST_DIR) / "vectors.pkl"
+                if pickle_path.exists():
+                    # Migrate existing pickle data
+                    if rag_pipeline.vector_store.export_to_qdrant():
+                        logger.info("✓ Successfully migrated pickle data to Qdrant")
+                        # Reinitialize to use Qdrant
+                        rag_pipeline = RAGPipeline()
+                    else:
+                        logger.warning("Migration failed - will ingest docs directly to Qdrant")
+                else:
+                    logger.info("No pickle data found - will ingest docs directly to Qdrant")
+            else:
+                logger.info("Already using Qdrant - no migration needed")
+        except Exception as e:
+            logger.warning(f"Migration check failed: {e} - continuing with normal flow")
+    
     # Check document count
     stats = rag_pipeline.get_stats()
     if stats['total_documents'] == 0:

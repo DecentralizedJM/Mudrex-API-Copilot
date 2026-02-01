@@ -5,6 +5,7 @@ Copyright (c) 2025 DecentralizedJM (https://github.com/DecentralizedJM)
 Licensed under MIT License - See LICENSE file for details.
 """
 import logging
+import re
 from typing import List, Dict, Any, Optional
 
 from google.genai import types
@@ -234,6 +235,22 @@ class RAGPipeline:
         logger.info(f"Processing query: {question[:50]}...")
         retrieved_docs = self.vector_store.search(question, top_k=top_k)
         
+        # 4.5. If query looks like an error log, boost retrieval with error-code docs
+        if self._looks_like_error_log(question):
+            logger.info("Query looks like error log; boosting with error-code docs")
+            error_docs = self.vector_store.search(
+                "Mudrex API error codes precision step size order errors",
+                top_k=5
+            )
+            if error_docs:
+                seen = {doc.get("document", "")[:200] for doc in retrieved_docs}
+                for doc in reversed(error_docs):
+                    key = doc.get("document", "")[:200]
+                    if key not in seen:
+                        seen.add(key)
+                        retrieved_docs.insert(0, doc)
+                logger.info(f"Added {len(error_docs)} error-related doc(s) to context")
+        
         # DEBUG: Log retrieval scores
         if retrieved_docs:
             logger.info("Top retrieved docs:")
@@ -380,6 +397,30 @@ class RAGPipeline:
         logger.info(f"No docs found after {max_iterations} iterations")
         return []
     
+    def _looks_like_error_log(self, question: str) -> bool:
+        """
+        Detect if the user message looks like a pasted error (HTTP status, code, msg, etc.)
+        so we can boost retrieval with error-code docs.
+        """
+        q = question.strip()
+        if not q or len(q) > 2000:
+            return False
+        # HTTP status in message (e.g. "400", "401", "429", "500")
+        if re.search(r"\b(400|401|403|404|429|500)\b", q):
+            return True
+        # JSON-style error: "code" and "msg"
+        if '"code"' in q and '"msg"' in q:
+            return True
+        if "'code'" in q and "'msg'" in q:
+            return True
+        # Numeric error code (e.g. -1111, -1121)
+        if re.search(r"-\d{4}\b", q):
+            return True
+        # Common error log patterns
+        if re.search(r"POST\s+/fapi|GET\s+/fapi", q, re.I) and re.search(r"\b(400|401|429)\b", q):
+            return True
+        return False
+
     def _decompose_query(self, question: str) -> str:
         """
         Decompose complex/indirect questions into simpler, more direct API-related queries.

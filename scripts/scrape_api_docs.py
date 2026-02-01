@@ -5,6 +5,7 @@ import time
 import os
 
 LINKS = [
+    "https://docs.trade.mudrex.com/docs/overview",  # Overview page with specs
     "https://docs.trade.mudrex.com/docs/authentication-rate-limits",
     "https://docs.trade.mudrex.com/docs/error-handling",
     "https://docs.trade.mudrex.com/docs/wallet",

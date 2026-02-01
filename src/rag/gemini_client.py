@@ -938,9 +938,10 @@ Provide a helpful response that:
 
 ## Response Style
 - 2-4 sentences + code snippet (if applicable)
-- Start with: "This isn't in my Mudrex docs, but..."
+- Be direct and confident - explain based on general API/trading principles
 - Provide working code examples for implementation questions
 - Keep it practical and code-focused
+- Don't say "not in docs" - just answer with your best reasoning
 
 Generate a helpful response:"""
         
@@ -960,10 +961,6 @@ Generate a helpful response:"""
                 return "Couldn't find that. Docs: https://docs.trade.mudrex.com — @DecentralizedJM can help with specifics."
             
             answer = self._clean_response(answer)
-            
-            # Ensure it acknowledges it's not from Mudrex docs
-            if "mudrex" not in answer.lower()[:100] and "docs" not in answer.lower()[:100]:
-                answer = f"This isn't in my Mudrex docs, but {answer.lower()}"
             
             return answer
         except ClientError as e:

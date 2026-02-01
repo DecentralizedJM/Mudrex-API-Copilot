@@ -32,6 +32,11 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Suppress httpx/httpcore INFO logs - they expose tokens in request URLs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+
 # Health check server
 _health_app = None
 

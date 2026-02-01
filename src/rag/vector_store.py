@@ -470,7 +470,7 @@ class VectorStore:
             
             formatted_results.append({
                 'document': payload.get('document', '') if isinstance(payload, dict) else '',
-                'metadata': {k: v for k, v in (payload.items() if isinstance(payload, dict) else {}).items() 
+                'metadata': {k: v for k, v in (payload if isinstance(payload, dict) else {}).items() 
                             if k not in ['document', 'original_id']},
                 'similarity': float(score),
                 'distance': 1 - float(score)
@@ -611,7 +611,7 @@ class VectorStore:
                 
                 formatted_results.append({
                     'document': payload.get('document', '') if isinstance(payload, dict) else '',
-                    'metadata': {k: v for k, v in (payload.items() if isinstance(payload, dict) else {}).items() 
+                    'metadata': {k: v for k, v in (payload if isinstance(payload, dict) else {}).items() 
                                 if k not in ['document', 'original_id']},
                     'similarity': float(score),
                     'distance': 1 - float(score)

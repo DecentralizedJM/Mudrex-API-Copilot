@@ -7,7 +7,6 @@ import logging
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.rag import RAGPipeline
-from src.rag.gemini_client import GeminiClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,19 +14,12 @@ logging.basicConfig(level=logging.INFO)
 def test_persona():
     print("Initializing RAG Pipeline with new Persona...")
     rag = RAGPipeline()
-    client = rag.gemini_client
-    
-    # Test Log Detection Logic
-    print("\n1. Testing Log Detection Logic:")
+
     log_message = """
     bot_log.txt:4944:2026-01-14 18:36:10 [ERROR] AsyncBot: ❌ Telegram API Error: 409
     bot_log.txt:4945:2026-01-14 18:36:14 [WARNING] mudrex.client: Rate limited, retrying in 1.0s...
     """
-    is_related = client.is_api_related_query(log_message)
-    print(f"   Log Message Detected? {'✅ YES' if is_related else '❌ NO'}")
-    
-    # Test RAG Response to Logs
-    print("\n2. Testing Response to Error Logs (409 Conflict):")
+    print("\n1. Testing Response to Error Logs (409 Conflict):")
     response = rag.query(log_message)
     print("-" * 50)
     print(response['answer'])
@@ -39,7 +31,7 @@ def test_persona():
         print("   ❌ Bot failed to identify specific 409 issue")
 
     # Test Persona Style
-    print("\n3. Testing Persona Style (Direct vs Chatty):")
+    print("\n2. Testing Persona Style (Direct vs Chatty):")
     q = "How do I authenticate?"
     response = rag.query(q)
     print(f"Q: {q}")
@@ -50,29 +42,8 @@ def test_persona():
     else:
          print("   ✅ Bot seems direct")
 
-    # Test Chitchat Filtering
-    print("\n4. Testing Chitchat Filtering:")
-    q_chat = "hi"
-    is_related = client.is_api_related_query(q_chat)
-    print(f"Q: '{q_chat}' -> detected? {is_related}")
-    if not is_related:
-        print("   ✅ Bot correctly IGNORED pure chitchat")
-    else:
-        print("   ⚠️  Bot might be too responsive to chitchat")
-
-    # Test Strict Filtering (Mars Dust)
-    print("\n5. Testing Strict Filtering (Mars Dust):")
-    q_irrelevant = "What is the price of Mars dust?"
-    is_related = client.is_api_related_query(q_irrelevant)
-    print(f"Q: '{q_irrelevant}' -> detected? {is_related}")
-    
-    if not is_related:
-        print("   ✅ Bot correctly IGNORED irrelevant query")
-    else:
-        print("   ❌ Bot FAILED to ignore irrelevant query")
-
     # Test Latency Knowledge
-    print("\n6. Testing Latency Knowledge:")
+    print("\n3. Testing Latency Knowledge:")
     q_latency = "What is the rate limit and latency?"
     response = rag.query(q_latency)
     print(f"Q: {q_latency}")

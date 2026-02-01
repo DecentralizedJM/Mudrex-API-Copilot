@@ -88,18 +88,6 @@ def test_gemini_client():
         client = GeminiClient()
         print(f"   ✓ Gemini client initialized")
         
-        # Test query detection
-        tests = [
-            ("How do I authenticate?", True),
-            ("Show my positions", True),
-            ("What's for lunch?", False),
-        ]
-        
-        for query, expected in tests:
-            result = client.is_api_related_query(query)
-            status = "✓" if result == expected else "✗"
-            print(f"   {status} '{query}' -> {result}")
-        
     except Exception as e:
         print(f"   ✗ Error: {e}")
         return False

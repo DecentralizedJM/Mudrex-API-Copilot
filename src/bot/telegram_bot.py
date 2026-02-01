@@ -301,6 +301,7 @@ class MudrexBot:
         self.app.add_handler(CommandHandler("learn", self.cmd_learn)) # Removed ChatType filter to allow flexibility if we open DMs later
         self.app.add_handler(CommandHandler("set_fact", self.cmd_set_fact))
         self.app.add_handler(CommandHandler("delete_fact", self.cmd_delete_fact))
+        self.app.add_handler(CommandHandler("clearcache", self.cmd_clearcache))
         
         # Message handler - ONLY in groups, only when mentioned/tagged
         self.app.add_handler(
@@ -777,6 +778,49 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             await update.message.reply_text(f"Deleted **{key}**.", parse_mode=ParseMode.MARKDOWN)
         else:
             await update.message.reply_text(f"Couldn't find **{key}**.", parse_mode=ParseMode.MARKDOWN)
+
+    async def cmd_clearcache(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        /clearcache [type]
+        Clear cached responses. Types: all, semantic, response
+        Useful when bot was returning wrong answers due to bugs.
+        """
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            await update.message.reply_text(f"Admin only. Your ID: `{user_id}`", parse_mode=ParseMode.MARKDOWN)
+            return
+
+        cache_type = context.args[0].lower() if context.args else "all"
+        
+        cleared = []
+        
+        try:
+            # Clear semantic cache
+            if cache_type in ["all", "semantic"]:
+                if self.rag_pipeline.semantic_cache:
+                    self.rag_pipeline.semantic_cache.clear()
+                    cleared.append("semantic cache")
+            
+            # Clear response cache (Redis)
+            if cache_type in ["all", "response"]:
+                if self.rag_pipeline.cache and self.rag_pipeline.cache.connected:
+                    # Clear response keys
+                    keys = self.rag_pipeline.cache.redis_client.keys("response:*")
+                    if keys:
+                        self.rag_pipeline.cache.redis_client.delete(*keys)
+                    cleared.append("response cache")
+            
+            if cleared:
+                await update.message.reply_text(
+                    f"Cleared: {', '.join(cleared)}.\n\nBot will now generate fresh responses.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await update.message.reply_text("No caches to clear.")
+                
+        except Exception as e:
+            logger.error(f"Error clearing cache: {e}")
+            await update.message.reply_text(f"Error clearing cache: {e}")
 
     # ==================== MCP (AI co-pilot: use whenever needed) ====================
     

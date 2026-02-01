@@ -88,6 +88,10 @@ class VectorStore:
             logger.info(f"Connected to Qdrant Cloud: {config.QDRANT_URL}")
             logger.info(f"Collection '{self.collection_name}' has {doc_count} documents")
             
+            # Log available search methods for debugging
+            search_methods = [m for m in ['search', 'query_points', 'query'] if hasattr(self.client, m)]
+            logger.info(f"Qdrant client search methods available: {search_methods}")
+            
         except Exception as e:
             logger.error(f"Failed to connect to Qdrant: {e}")
             logger.warning("Falling back to local pickle storage")
@@ -389,19 +393,29 @@ class VectorStore:
             ]
             query_filter = models.Filter(must=conditions)
         
-        # Search Qdrant - use query method (available in all versions)
-        try:
-            # Use the query method which is more universal
-            results = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_embedding,
-                query_filter=query_filter,
-                limit=top_k,
-                score_threshold=config.SIMILARITY_THRESHOLD,
-                with_payload=True,
-            ).points
-        except AttributeError:
-            # Fallback: Try search method
+        # Search Qdrant - try multiple methods for compatibility
+        results = []
+        search_success = False
+        
+        # Method 1: Try query_points (qdrant-client 1.12+)
+        if not search_success and hasattr(self.client, 'query_points'):
+            try:
+                query_result = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_embedding,
+                    query_filter=query_filter,
+                    limit=top_k,
+                    score_threshold=config.SIMILARITY_THRESHOLD,
+                    with_payload=True,
+                )
+                results = query_result.points if hasattr(query_result, 'points') else []
+                search_success = True
+                logger.debug(f"Qdrant search via query_points: {len(results)} results")
+            except Exception as e:
+                logger.debug(f"query_points failed: {e}")
+        
+        # Method 2: Try search (qdrant-client 1.7+)
+        if not search_success and hasattr(self.client, 'search'):
             try:
                 results = self.client.search(
                     collection_name=self.collection_name,
@@ -410,12 +424,34 @@ class VectorStore:
                     limit=top_k,
                     score_threshold=config.SIMILARITY_THRESHOLD,
                 )
-            except Exception as search_error:
-                logger.error(f"Qdrant search fallback error: {search_error}", exc_info=True)
-                results = []
-        except Exception as e:
-            logger.error(f"Qdrant query error: {e}", exc_info=True)
-            results = []
+                search_success = True
+                logger.debug(f"Qdrant search via search: {len(results)} results")
+            except Exception as e:
+                logger.debug(f"search failed: {e}")
+        
+        # Method 3: Try REST API directly
+        if not search_success:
+            try:
+                from qdrant_client.http import models as rest_models
+                search_request = rest_models.SearchRequest(
+                    vector=query_embedding,
+                    filter=query_filter,
+                    limit=top_k,
+                    score_threshold=config.SIMILARITY_THRESHOLD,
+                    with_payload=True,
+                )
+                response = self.client.http.points_api.search_points(
+                    collection_name=self.collection_name,
+                    search_request=search_request,
+                )
+                results = response.result if hasattr(response, 'result') else []
+                search_success = True
+                logger.debug(f"Qdrant search via REST API: {len(results)} results")
+            except Exception as e:
+                logger.error(f"Qdrant REST API search failed: {e}", exc_info=True)
+        
+        if not search_success:
+            logger.error(f"All Qdrant search methods failed. Client type: {type(self.client)}, methods: {[m for m in dir(self.client) if not m.startswith('_')][:20]}")
         
         # Format results (handle both direct API and HTTP API response formats)
         formatted_results = []
@@ -509,18 +545,27 @@ class VectorStore:
         query_embedding = self._get_embedding(query)
         
         if self.use_qdrant:
-            # Search with lower threshold
-            try:
-                # Use the query method which is more universal
-                results = self.client.query_points(
-                    collection_name=self.collection_name,
-                    query=query_embedding,
-                    limit=top_k,
-                    score_threshold=min_threshold,
-                    with_payload=True,
-                ).points
-            except AttributeError:
-                # Fallback: Try search method
+            # Search with lower threshold - use same robust method as primary search
+            results = []
+            search_success = False
+            
+            # Method 1: Try query_points (qdrant-client 1.12+)
+            if not search_success and hasattr(self.client, 'query_points'):
+                try:
+                    query_result = self.client.query_points(
+                        collection_name=self.collection_name,
+                        query=query_embedding,
+                        limit=top_k,
+                        score_threshold=min_threshold,
+                        with_payload=True,
+                    )
+                    results = query_result.points if hasattr(query_result, 'points') else []
+                    search_success = True
+                except Exception as e:
+                    logger.debug(f"search_all_relevant query_points failed: {e}")
+            
+            # Method 2: Try search (qdrant-client 1.7+)
+            if not search_success and hasattr(self.client, 'search'):
                 try:
                     results = self.client.search(
                         collection_name=self.collection_name,
@@ -528,12 +573,28 @@ class VectorStore:
                         limit=top_k,
                         score_threshold=min_threshold,
                     )
-                except Exception as search_error:
-                    logger.error(f"Qdrant search_all_relevant fallback error: {search_error}", exc_info=True)
-                    results = []
-            except Exception as e:
-                logger.error(f"Qdrant search_all_relevant error: {e}", exc_info=True)
-                results = []
+                    search_success = True
+                except Exception as e:
+                    logger.debug(f"search_all_relevant search failed: {e}")
+            
+            # Method 3: Try REST API directly
+            if not search_success:
+                try:
+                    from qdrant_client.http import models as rest_models
+                    search_request = rest_models.SearchRequest(
+                        vector=query_embedding,
+                        limit=top_k,
+                        score_threshold=min_threshold,
+                        with_payload=True,
+                    )
+                    response = self.client.http.points_api.search_points(
+                        collection_name=self.collection_name,
+                        search_request=search_request,
+                    )
+                    results = response.result if hasattr(response, 'result') else []
+                    search_success = True
+                except Exception as e:
+                    logger.error(f"search_all_relevant REST API failed: {e}")
             
             formatted_results = []
             for result in results:

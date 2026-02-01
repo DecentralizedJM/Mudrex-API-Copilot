@@ -271,6 +271,10 @@ class MudrexBot:
             window_seconds=config.RATE_LIMIT_WINDOW
         )
         
+        # Conflict tracking
+        self.conflict_count = 0
+        self.max_conflicts = 5  # Stop after 5 consecutive conflicts
+        
         self.app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
         self._register_handlers()
         self._register_error_handlers()
@@ -334,8 +338,9 @@ class MudrexBot:
             error = context.error
             
             if isinstance(error, Conflict):
+                self.conflict_count += 1
                 logger.error("=" * 60)
-                logger.error("RUNTIME CONFLICT ERROR - Multiple bot instances detected!")
+                logger.error(f"RUNTIME CONFLICT ERROR #{self.conflict_count} - Multiple bot instances detected!")
                 logger.error("=" * 60)
                 logger.error("Another bot instance started polling while this one was running.")
                 logger.error("This usually means:")
@@ -343,15 +348,37 @@ class MudrexBot:
                 logger.error("  2. Local dev instance conflicts with production")
                 logger.error("  3. Railway auto-restarted but old container didn't stop")
                 logger.error("")
-                logger.error("Action: This instance will continue, but may miss messages.")
-                logger.error("Check Railway for duplicate deployments and stop them.")
-                logger.error("=" * 60)
+                
+                if self.conflict_count >= self.max_conflicts:
+                    logger.error(f"⚠️  STOPPING POLLING: {self.max_conflicts} consecutive conflicts detected!")
+                    logger.error("This instance will stop polling to prevent log spam.")
+                    logger.error("ACTION REQUIRED:")
+                    logger.error("  1. Check Railway for duplicate deployments")
+                    logger.error("  2. Stop ALL other bot instances")
+                    logger.error("  3. Wait 60 seconds for Telegram to release the connection")
+                    logger.error("  4. Restart this instance")
+                    logger.error("=" * 60)
+                    # Stop polling gracefully
+                    try:
+                        await self.app.updater.stop()
+                        logger.info("Polling stopped due to repeated conflicts")
+                    except Exception as stop_error:
+                        logger.error(f"Error stopping updater: {stop_error}")
+                    return
+                else:
+                    logger.error(f"Action: Continuing (conflict {self.conflict_count}/{self.max_conflicts})")
+                    logger.error("Check Railway for duplicate deployments and stop them.")
+                    logger.error("=" * 60)
+                
                 # Report to Station Master
                 try:
-                    await report_error(error, "exception", context={"error_type": "telegram_runtime_conflict"})
+                    await report_error(error, "exception", context={
+                        "error_type": "telegram_runtime_conflict",
+                        "conflict_count": self.conflict_count
+                    })
                 except Exception:
                     pass
-                # Don't crash - just log and continue
+                # Don't crash - just log and continue (until max conflicts)
                 return
             
             # Log other errors
@@ -1215,6 +1242,8 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             await self.app.initialize()
             await self.setup_commands()
             await self.app.start()
+            # Reset conflict counter on successful start
+            self.conflict_count = 0
             await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
             logger.info("MudrexBot started (GROUP-ONLY mode)")
         except Conflict as e:

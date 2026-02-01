@@ -172,23 +172,42 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
         
         await update.message.reply_text(msg, parse_mode="Markdown")
     
+    def _is_from_copilot(self, message: Message) -> bool:
+        """Check if message is from the Copilot bot (it may reply to anyone who asked)."""
+        if not message or not message.from_user:
+            return False
+        username = (message.from_user.username or "").lower()
+        copilot = (self.config.COPILOT_BOT_USERNAME or "").lower().lstrip("@")
+        return username == copilot
+    
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages - check if it's a copilot response"""
         message = update.message
         if not message or not message.text:
             return
         
-        # Check if this is a reply to one of our test messages
+        # Case 1: Reply to our test message (ideal)
         if message.reply_to_message:
             original_id = message.reply_to_message.message_id
-            
-            if original_id in self._pending_tests:
-                # This is a response to our test!
+            if original_id in self._pending_tests and self._is_from_copilot(message):
                 self._responses[original_id] = message
-                
-                # Signal that we got a response
                 if original_id in self._response_events:
                     self._response_events[original_id].set()
+                return
+        
+        # Case 2: Message from Copilot (not a reply) - Copilot often replies to whoever
+        # triggered it (e.g. user who forwarded), not to Stalker. Accept any Copilot
+        # message in the group while we're waiting - it's almost certainly our answer.
+        if not self._is_from_copilot(message):
+            return
+        if not self._pending_tests:
+            return
+        # Match to most recent pending test (we send one, wait, so typically one pending)
+        latest_id = max(self._pending_tests.keys(), key=lambda k: self._pending_tests[k][1])
+        if latest_id not in self._responses:  # Don't overwrite if we already got a reply
+            self._responses[latest_id] = message
+            if latest_id in self._response_events:
+                self._response_events[latest_id].set()
     
     async def run_qa_suite(self, count: int = 20) -> DailySummary:
         """Run full QA test suite"""

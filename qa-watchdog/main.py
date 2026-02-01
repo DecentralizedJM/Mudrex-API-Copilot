@@ -97,6 +97,12 @@ async def main():
     for job_id, next_time in next_runs.items():
         logger.info(f"  - {job_id}: {next_time}")
     
+    # Delay before starting bot - lets old instance shut down during redeploy (avoids Conflict)
+    delay = config.BOT_STARTUP_DELAY
+    if delay > 0:
+        logger.info(f"Waiting {delay}s before starting bot (avoids Conflict during redeploy)...")
+        await asyncio.sleep(delay)
+    
     # Start the bot
     await bot.start()
     

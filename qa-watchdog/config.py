@@ -1,0 +1,95 @@
+"""
+QA Watchdog Bot Configuration
+
+Environment variables for the QA service.
+"""
+import os
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class Config:
+    """Configuration for QA Watchdog Bot"""
+    
+    # Telegram
+    QA_TELEGRAM_BOT_TOKEN: str
+    QA_TEST_GROUP_ID: int
+    COPILOT_BOT_USERNAME: str
+    ADMIN_USERNAME: str
+    
+    # Gemini
+    QA_GEMINI_API_KEY: str
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+    
+    # Redis (optional, for history tracking)
+    REDIS_URL: Optional[str] = None
+    
+    # Timing
+    RESPONSE_TIMEOUT: int = 60  # seconds to wait for copilot response
+    TEST_INTERVAL: int = 30  # seconds between tests
+    
+    # Scheduler
+    DAILY_QA_HOUR: int = 3  # UTC hour for full daily QA suite
+    DAILY_QA_MINUTE: int = 0
+    CRITICAL_TEST_INTERVAL_HOURS: int = 6
+    SPOT_CHECK_INTERVAL_HOURS: int = 2
+    
+    # Test counts
+    DAILY_TEST_COUNT: int = 20
+    CRITICAL_TEST_COUNT: int = 5
+    SPOT_CHECK_COUNT: int = 2
+    
+    # Reports
+    REPORTS_DIR: str = "qa-watchdog/reports"
+    DATA_DIR: str = "qa-watchdog/data"
+    
+    # Health check
+    HEALTH_PORT: int = 8081
+    
+    @classmethod
+    def from_env(cls) -> "Config":
+        """Load configuration from environment variables"""
+        return cls(
+            QA_TELEGRAM_BOT_TOKEN=os.environ["QA_TELEGRAM_BOT_TOKEN"],
+            QA_TEST_GROUP_ID=int(os.environ["QA_TEST_GROUP_ID"]),
+            COPILOT_BOT_USERNAME=os.environ.get("COPILOT_BOT_USERNAME", "API_Assistant_V2_bot"),
+            ADMIN_USERNAME=os.environ.get("ADMIN_USERNAME", "DecentralizedJM"),
+            QA_GEMINI_API_KEY=os.environ["QA_GEMINI_API_KEY"],
+            GEMINI_MODEL=os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
+            REDIS_URL=os.environ.get("REDIS_URL"),
+            RESPONSE_TIMEOUT=int(os.environ.get("RESPONSE_TIMEOUT", "60")),
+            TEST_INTERVAL=int(os.environ.get("TEST_INTERVAL", "30")),
+            DAILY_QA_HOUR=int(os.environ.get("DAILY_QA_HOUR", "3")),
+            DAILY_QA_MINUTE=int(os.environ.get("DAILY_QA_MINUTE", "0")),
+            CRITICAL_TEST_INTERVAL_HOURS=int(os.environ.get("CRITICAL_TEST_INTERVAL_HOURS", "6")),
+            SPOT_CHECK_INTERVAL_HOURS=int(os.environ.get("SPOT_CHECK_INTERVAL_HOURS", "2")),
+            DAILY_TEST_COUNT=int(os.environ.get("DAILY_TEST_COUNT", "20")),
+            CRITICAL_TEST_COUNT=int(os.environ.get("CRITICAL_TEST_COUNT", "5")),
+            SPOT_CHECK_COUNT=int(os.environ.get("SPOT_CHECK_COUNT", "2")),
+            REPORTS_DIR=os.environ.get("REPORTS_DIR", "qa-watchdog/reports"),
+            DATA_DIR=os.environ.get("DATA_DIR", "qa-watchdog/data"),
+            HEALTH_PORT=int(os.environ.get("HEALTH_PORT", "8081")),
+        )
+    
+    def validate(self) -> None:
+        """Validate required configuration"""
+        if not self.QA_TELEGRAM_BOT_TOKEN:
+            raise ValueError("QA_TELEGRAM_BOT_TOKEN is required")
+        if not self.QA_GEMINI_API_KEY:
+            raise ValueError("QA_GEMINI_API_KEY is required")
+        if not self.QA_TEST_GROUP_ID:
+            raise ValueError("QA_TEST_GROUP_ID is required")
+
+
+# Global config instance
+config: Optional[Config] = None
+
+
+def get_config() -> Config:
+    """Get or create config instance"""
+    global config
+    if config is None:
+        config = Config.from_env()
+        config.validate()
+    return config

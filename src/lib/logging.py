@@ -73,15 +73,16 @@ def configure_logging(
     use_json = json_format or is_production
     
     # Build processor chain
-    # Note: filter_by_level removed - make_filtering_bound_logger handles filtering
+    # Note: stdlib processors (filter_by_level, add_logger_name) removed
+    # as they require stdlib logger, but we use PrintLoggerFactory
     processors: list[Processor] = [
-        structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
         add_environment_info,
+        add_version_info,
         censor_sensitive_data,
     ]
     

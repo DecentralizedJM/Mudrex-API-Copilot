@@ -115,6 +115,11 @@ async def main():
     logger.info("=" * 60)
     logger.info("")
     
+    # Optional: run a spot check on startup to verify setup
+    if config.RUN_QA_ON_STARTUP:
+        logger.info("Running spot check on startup (RUN_QA_ON_STARTUP=1)...")
+        asyncio.create_task(bot.run_spot_check(count=1))
+    
     # Keep running
     stop_event = asyncio.Event()
     

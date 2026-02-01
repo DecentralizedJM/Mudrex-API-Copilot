@@ -50,6 +50,9 @@ class Config:
     # Bot startup - delay before polling to let old instance shut down (avoids Conflict)
     BOT_STARTUP_DELAY: int = 30
     
+    # Run a spot check on startup to verify setup (set RUN_QA_ON_STARTUP=1)
+    RUN_QA_ON_STARTUP: bool = False
+    
     @classmethod
     def _get_env(cls, key: str, fallback_key: Optional[str] = None, fallback_keys: Optional[list[str]] = None, default: Optional[str] = None) -> str:
         """Get env var with optional fallbacks (Railway may use different names)."""
@@ -93,6 +96,7 @@ class Config:
             # Railway injects PORT; use it so healthcheck works
             HEALTH_PORT=int(os.environ.get("PORT", os.environ.get("HEALTH_PORT", "8081"))),
             BOT_STARTUP_DELAY=int(os.environ.get("BOT_STARTUP_DELAY", "30")),
+            RUN_QA_ON_STARTUP=os.environ.get("RUN_QA_ON_STARTUP", "").lower() in ("1", "true", "yes"),
         )
     
     def validate(self) -> None:

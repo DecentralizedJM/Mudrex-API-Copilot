@@ -1,0 +1,13 @@
+name: Deploy
+
+# DISABLED - Railway handles deployment automatically
+on:
+  workflow_dispatch:  # Only run manually
+
+jobs:
+  skip:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip
+        run: echo "Deployment handled by Railway"

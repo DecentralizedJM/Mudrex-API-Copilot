@@ -21,21 +21,20 @@ from src.bot import MudrexBot
 from src.mcp import MudrexMCPClient
 from src.tasks.scheduler import setup_scheduler
 from src.lib.error_reporter import report_error_sync, report_error
+from src.health import set_components, start_health_server
+from src.lib.metrics import init_service_info, update_documents_count
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('bot.log')
-    ]
+# Configure structured logging
+from src.lib.logging import configure_logging, get_logger
+
+# Use JSON format in production, colored console in development
+is_production = os.getenv("RAILWAY_ENVIRONMENT") == "production"
+configure_logging(
+    log_level=os.getenv("LOG_LEVEL", "INFO"),
+    json_format=is_production,
 )
 
-# SECURITY: Suppress verbose httpx logs to prevent token exposure
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def validate_config():
@@ -60,9 +59,37 @@ async def async_main():
     validate_config()
     logger.info("Configuration validated")
     
+    # Start health server FIRST so Railway health check passes during slow init
+    health_port = int(os.getenv("PORT") or os.getenv("HEALTH_PORT", "8080"))
+    health_task = asyncio.create_task(start_health_server(port=health_port))
+    logger.info(f"Health server starting on port {health_port}")
+    
     # Initialize RAG pipeline
     logger.info("Initializing RAG pipeline...")
     rag_pipeline = RAGPipeline()
+    
+    # One-time migration: Pickle → Qdrant (if Qdrant is configured)
+    if config.QDRANT_URL and config.QDRANT_API_KEY:
+        logger.info("Qdrant configured - checking for migration...")
+        try:
+            # Check if we're using pickle (not Qdrant)
+            if not rag_pipeline.vector_store.use_qdrant:
+                logger.info("Currently using pickle storage - attempting migration to Qdrant...")
+                pickle_path = Path(config.CHROMA_PERSIST_DIR) / "vectors.pkl"
+                if pickle_path.exists():
+                    # Migrate existing pickle data
+                    if rag_pipeline.vector_store.export_to_qdrant():
+                        logger.info("✓ Successfully migrated pickle data to Qdrant")
+                        # Reinitialize to use Qdrant
+                        rag_pipeline = RAGPipeline()
+                    else:
+                        logger.warning("Migration failed - will ingest docs directly to Qdrant")
+                else:
+                    logger.info("No pickle data found - will ingest docs directly to Qdrant")
+            else:
+                logger.info("Already using Qdrant - no migration needed")
+        except Exception as e:
+            logger.warning(f"Migration check failed: {e} - continuing with normal flow")
     
     # Check document count
     stats = rag_pipeline.get_stats()
@@ -112,6 +139,17 @@ async def async_main():
     logger.info("Initializing Telegram bot...")
     bot = MudrexBot(rag_pipeline, mcp_client)
     
+    # Set components for health checks
+    set_components(rag_pipeline=rag_pipeline, mcp_client=mcp_client, bot=bot)
+    
+    # Initialize metrics
+    init_service_info(
+        version="2.0.0",
+        model=config.GEMINI_MODEL,
+        environment=os.getenv("RAILWAY_ENVIRONMENT", "development")
+    )
+    update_documents_count(stats['total_documents'])
+    
     # Scheduler for daily changelog scrape + ingest + broadcast
     scheduler = None
     if config.ENABLE_CHANGELOG_WATCHER:
@@ -127,6 +165,7 @@ async def async_main():
         logger.info("")
         logger.info("=" * 60)
         logger.info("  Bot is LIVE! Press Ctrl+C to stop.")
+        logger.info(f"  Health endpoint: http://localhost:{health_port}/health")
         logger.info("=" * 60)
         logger.info("")
         

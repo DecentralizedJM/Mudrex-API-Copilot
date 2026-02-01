@@ -14,6 +14,8 @@ from .gemini_client import GeminiClient
 from .document_loader import DocumentLoader
 from .fact_store import FactStore
 from .cache import RedisCache
+from .query_planner import QueryPlanner, QueryPlan, QueryType
+from .semantic_cache import SemanticCache
 from ..config import config
 
 logger = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ except ImportError:
 
 
 class RAGPipeline:
-    """Coordinates the RAG workflow"""
+    """Coordinates the RAG workflow with query planning for cost optimization"""
     
     def __init__(self):
         """Initialize RAG components"""
@@ -41,11 +43,17 @@ class RAGPipeline:
         self.fact_store = FactStore()
         self.cache = RedisCache() if config.REDIS_ENABLED else None
         
+        # Initialize query planner (for cost optimization)
+        self.query_planner = QueryPlanner(fact_store=self.fact_store)
+        
+        # Initialize semantic cache (for similar query deduplication)
+        self.semantic_cache = SemanticCache() if config.REDIS_ENABLED else None
+        
         # Initialize context management (optional)
         self.context_manager = ContextManager() if ContextManager else None
         self.semantic_memory = SemanticMemory() if SemanticMemory else None
         
-        logger.info("RAG Pipeline initialized")
+        logger.info("RAG Pipeline initialized with query planner and semantic cache")
     
     def ingest_documents(self, docs_directory: str) -> int:
         """
@@ -84,7 +92,7 @@ class RAGPipeline:
         chat_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Process a query through the RAG pipeline.
+        Process a query through the RAG pipeline with query planning optimization.
         When mcp_context is provided (live MCP data), it is passed to the model as co-pilot context.
         
         Args:
@@ -96,6 +104,21 @@ class RAGPipeline:
         Returns:
             Dict with 'answer', 'sources', and 'is_relevant'
         """
+        # 0. Query Planning - Decide execution strategy for cost optimization
+        plan = self.query_planner.plan(question, context={"chat_history": chat_history})
+        logger.debug(f"Query plan: {plan.query_type.value}, reason: {plan.reason}")
+        
+        # Handle canned responses (greetings, etc.) - skip everything
+        if plan.skip_all and plan.use_canned_response:
+            response = self.query_planner.get_canned_response(plan.canned_response_key or "greeting")
+            logger.info(f"Using canned response for {plan.query_type.value}")
+            return {
+                'answer': response,
+                'sources': [{'filename': 'QueryPlanner (canned)', 'similarity': 1.0}],
+                'is_relevant': True,
+                'plan': plan.query_type.value
+            }
+        
         # 1. Check Fact Store (Strict Rules) - PRIORITY OVER EVERYTHING
         fact_match = self.fact_store.search(question)
         if fact_match:
@@ -109,7 +132,7 @@ class RAGPipeline:
         # NOTE: is_api_related check is now done in telegram_bot.py (handle_message)
         # Pipeline should always process what gets to it after that gatekeeper check
         
-        # 2. Check response cache first
+        # 2. Check response cache first (exact match)
         if self.cache:
             try:
                 cached = self.cache.get_response(question, chat_history, mcp_context)
@@ -118,6 +141,16 @@ class RAGPipeline:
                     return cached
             except Exception as e:
                 logger.warning(f"Cache get error (continuing without cache): {e}")
+        
+        # 2.1. Check semantic cache (similar query match)
+        if self.semantic_cache:
+            try:
+                semantic_cached = self.semantic_cache.get(question)
+                if semantic_cached:
+                    logger.info("Semantic cache hit: returning cached response for similar query")
+                    return semantic_cached
+            except Exception as e:
+                logger.warning(f"Semantic cache error (continuing): {e}")
 
         # 2.4. Trade ideas / signals — fixed template (no REST endpoint on Mudrex trade API)
         trade_ideas_response = self.gemini_client._get_missing_feature_response(question)
@@ -229,15 +262,19 @@ class RAGPipeline:
                 if not retrieved_docs:
                     retrieved_docs = self.vector_store.search_all_relevant(decomposed, top_k=10)
         
-        # 7. Validate document relevancy (Reliable RAG)
-        if retrieved_docs:
+        # 7. Validate document relevancy (Reliable RAG) - skip if plan says so
+        if retrieved_docs and not plan.skip_validation:
             logger.info(f"Validating relevancy of {len(retrieved_docs)} documents")
             retrieved_docs = self.gemini_client.validate_document_relevancy(question, retrieved_docs)
+        elif plan.skip_validation:
+            logger.debug("Skipping validation per query plan")
         
-        # 8. Rerank documents for better quality
-        if retrieved_docs:
+        # 8. Rerank documents for better quality - skip if plan says so
+        if retrieved_docs and not plan.skip_rerank:
             logger.info(f"Reranking {len(retrieved_docs)} documents")
             retrieved_docs = self.gemini_client.rerank_documents(question, retrieved_docs)
+        elif plan.skip_rerank:
+            logger.debug("Skipping rerank per query plan")
         
         # 9. Generate response
         if retrieved_docs:
@@ -290,12 +327,19 @@ class RAGPipeline:
             'is_relevant': True
         }
         
-        # Cache the response
+        # Cache the response (exact match cache)
         if self.cache:
             try:
                 self.cache.set_response(question, chat_history, mcp_context, result)
             except Exception as e:
                 logger.warning(f"Cache set error (non-critical): {e}")
+        
+        # Cache in semantic cache (for similar queries)
+        if self.semantic_cache:
+            try:
+                self.semantic_cache.set(question, result)
+            except Exception as e:
+                logger.warning(f"Semantic cache set error (non-critical): {e}")
         
         return result
     

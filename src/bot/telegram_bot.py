@@ -8,7 +8,7 @@ Licensed under MIT License
 """
 import logging
 import re
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict, Tuple, List, Any
 from collections import defaultdict
 import time
 
@@ -91,26 +91,170 @@ def _extract_shared_api_secret(message: str) -> Optional[str]:
 
 
 class RateLimiter:
-    """Simple rate limiter for group messages"""
+    """
+    Enhanced rate limiter with multi-level limits and Redis backend.
+    
+    Implements token bucket algorithm with:
+    - Per-user limits: 10 requests/minute
+    - Per-group limits: 50 requests/minute
+    - Global limits: 500 requests/minute
+    
+    Falls back to in-memory storage if Redis unavailable.
+    """
+    
+    # Rate limit configurations
+    USER_LIMIT = 10  # requests per minute per user
+    GROUP_LIMIT = 50  # requests per minute per group
+    GLOBAL_LIMIT = 500  # requests per minute globally
+    WINDOW_SECONDS = 60
     
     def __init__(self, max_messages: int = 50, window_seconds: int = 60):
         self.max_messages = max_messages
         self.window = window_seconds
-        self.group_messages: Dict[int, list] = defaultdict(list)  # Per group
-    
-    def is_allowed(self, chat_id: int) -> bool:
-        """Check if group is within rate limit"""
-        now = time.time()
-        self.group_messages[chat_id] = [
-            t for t in self.group_messages[chat_id] 
-            if now - t < self.window
-        ]
         
-        if len(self.group_messages[chat_id]) >= self.max_messages:
+        # In-memory storage (fallback)
+        self.user_messages: Dict[int, list] = defaultdict(list)
+        self.group_messages: Dict[int, list] = defaultdict(list)
+        self.global_messages: List[float] = []
+        
+        # Try to get Redis client
+        self.redis_client = None
+        try:
+            from ..rag.cache import RedisCache
+            cache = RedisCache()
+            if cache.connected and cache.redis_client:
+                self.redis_client = cache.redis_client
+                logger.info("RateLimiter using Redis backend")
+        except Exception as e:
+            logger.debug(f"RateLimiter using in-memory backend: {e}")
+    
+    def _clean_old_entries(self, entries: List[float], now: float) -> List[float]:
+        """Remove entries older than the window"""
+        return [t for t in entries if now - t < self.window]
+    
+    def _check_redis_limit(self, key: str, limit: int) -> bool:
+        """Check rate limit using Redis with sliding window"""
+        if not self.redis_client:
+            return True  # If Redis unavailable, skip this check
+        
+        try:
+            now = time.time()
+            window_start = now - self.WINDOW_SECONDS
+            
+            # Use Redis sorted set for sliding window
+            pipe = self.redis_client.pipeline()
+            pipe.zremrangebyscore(key, 0, window_start)  # Remove old entries
+            pipe.zcard(key)  # Count current entries
+            pipe.zadd(key, {str(now): now})  # Add current request
+            pipe.expire(key, self.WINDOW_SECONDS + 10)  # Set expiry
+            results = pipe.execute()
+            
+            current_count = results[1]
+            return current_count < limit
+            
+        except Exception as e:
+            logger.debug(f"Redis rate limit check failed: {e}")
+            return True  # Fail open
+    
+    def _check_memory_limit(self, storage: Dict[int, list], key: int, limit: int) -> bool:
+        """Check rate limit using in-memory storage"""
+        now = time.time()
+        storage[key] = self._clean_old_entries(storage[key], now)
+        
+        if len(storage[key]) >= limit:
             return False
         
-        self.group_messages[chat_id].append(now)
+        storage[key].append(now)
         return True
+    
+    def is_allowed(self, chat_id: int, user_id: int = None) -> bool:
+        """
+        Check if request is allowed under all rate limits.
+        
+        Args:
+            chat_id: The group/chat ID
+            user_id: Optional user ID for per-user limits
+            
+        Returns:
+            True if allowed, False if rate limited
+        """
+        now = time.time()
+        
+        # 1. Check global limit
+        if self.redis_client:
+            if not self._check_redis_limit("ratelimit:global", self.GLOBAL_LIMIT):
+                logger.warning("Global rate limit exceeded")
+                return False
+        else:
+            self.global_messages = self._clean_old_entries(self.global_messages, now)
+            if len(self.global_messages) >= self.GLOBAL_LIMIT:
+                logger.warning("Global rate limit exceeded (in-memory)")
+                return False
+            self.global_messages.append(now)
+        
+        # 2. Check group limit
+        group_key = f"ratelimit:group:{chat_id}"
+        if self.redis_client:
+            if not self._check_redis_limit(group_key, self.GROUP_LIMIT):
+                logger.info(f"Group rate limit exceeded for {chat_id}")
+                return False
+        else:
+            if not self._check_memory_limit(self.group_messages, chat_id, self.GROUP_LIMIT):
+                logger.info(f"Group rate limit exceeded for {chat_id} (in-memory)")
+                return False
+        
+        # 3. Check user limit (if user_id provided)
+        if user_id:
+            user_key = f"ratelimit:user:{user_id}"
+            if self.redis_client:
+                if not self._check_redis_limit(user_key, self.USER_LIMIT):
+                    logger.info(f"User rate limit exceeded for {user_id}")
+                    return False
+            else:
+                if not self._check_memory_limit(self.user_messages, user_id, self.USER_LIMIT):
+                    logger.info(f"User rate limit exceeded for {user_id} (in-memory)")
+                    return False
+        
+        return True
+    
+    def get_remaining(self, chat_id: int, user_id: int = None) -> Dict[str, int]:
+        """Get remaining requests for each limit level"""
+        now = time.time()
+        
+        # Calculate remaining for each level
+        remaining = {
+            "global": self.GLOBAL_LIMIT,
+            "group": self.GROUP_LIMIT,
+            "user": self.USER_LIMIT if user_id else None
+        }
+        
+        if self.redis_client:
+            try:
+                pipe = self.redis_client.pipeline()
+                pipe.zcount("ratelimit:global", now - self.WINDOW_SECONDS, now)
+                pipe.zcount(f"ratelimit:group:{chat_id}", now - self.WINDOW_SECONDS, now)
+                if user_id:
+                    pipe.zcount(f"ratelimit:user:{user_id}", now - self.WINDOW_SECONDS, now)
+                results = pipe.execute()
+                
+                remaining["global"] = max(0, self.GLOBAL_LIMIT - results[0])
+                remaining["group"] = max(0, self.GROUP_LIMIT - results[1])
+                if user_id:
+                    remaining["user"] = max(0, self.USER_LIMIT - results[2])
+            except Exception:
+                pass  # Return defaults on error
+        else:
+            self.global_messages = self._clean_old_entries(self.global_messages, now)
+            remaining["global"] = max(0, self.GLOBAL_LIMIT - len(self.global_messages))
+            
+            self.group_messages[chat_id] = self._clean_old_entries(self.group_messages[chat_id], now)
+            remaining["group"] = max(0, self.GROUP_LIMIT - len(self.group_messages[chat_id]))
+            
+            if user_id:
+                self.user_messages[user_id] = self._clean_old_entries(self.user_messages[user_id], now)
+                remaining["user"] = max(0, self.USER_LIMIT - len(self.user_messages[user_id]))
+        
+        return remaining
 
 
 class MudrexBot:
@@ -745,11 +889,17 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             logger.warning(f"Unauthorized group: {chat_id}")
             return
         
-        # Rate limiting (per group)
-        if not self.rate_limiter.is_allowed(chat_id):
-            await update.message.reply_text(
-                "Whoa, too many messages at once. Give it a minute and try again."
-            )
+        # Rate limiting (per user + per group + global)
+        if not self.rate_limiter.is_allowed(chat_id, user_id):
+            remaining = self.rate_limiter.get_remaining(chat_id, user_id)
+            if remaining.get("user", 1) == 0:
+                await update.message.reply_text(
+                    "You're sending too many messages. Wait a minute before trying again."
+                )
+            else:
+                await update.message.reply_text(
+                    "Too many messages in this group. Give it a minute and try again."
+                )
             return
 
         # If user pasted their API secret, return deterministic connection snippet + warning

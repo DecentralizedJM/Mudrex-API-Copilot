@@ -1,11 +1,17 @@
 # Dockerfile for Mudrex API Bot
+# Build timestamp: 2026-02-01-13:00
 FROM python:3.11-slim
+
+# Force rebuild - change timestamp above
+ARG BUILD_DATE=2026-02-01-13:00
+RUN echo "Building at: $BUILD_DATE"
 
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -18,12 +24,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Create data directory for vector store
+# Create data directory
 RUN mkdir -p data/chroma
 
-# Copy startup script
-COPY start.sh /app/start.sh
+# Make startup script executable
 RUN chmod +x /app/start.sh
 
-# Run the bot (startup script will auto-ingest docs if needed)
+# Environment
+ENV PYTHONUNBUFFERED=1
+
+# NO HEALTHCHECK - disable Railway health check in UI instead
 CMD ["/app/start.sh"]

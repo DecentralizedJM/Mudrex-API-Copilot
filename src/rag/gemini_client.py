@@ -1023,7 +1023,9 @@ Generate a helpful response:"""
                 has_error_docs = True
             
             # Check if this is legacy documentation (old API base URL)
-            is_legacy = (
+            # Note: error-codes.md is NOT legacy - error codes apply to current API too
+            is_error_doc = 'error' in source.lower() and ('code' in source.lower() or 'handling' in source.lower())
+            is_legacy = not is_error_doc and (
                 'https://api.mudrex.com/api/v1' in content or
                 'api.mudrex.com/api/v1' in content or
                 'legacy' in source.lower() or

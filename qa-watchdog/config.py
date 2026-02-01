@@ -48,14 +48,28 @@ class Config:
     HEALTH_PORT: int = 8081
     
     @classmethod
+    def _get_env(cls, key: str, fallback_key: Optional[str] = None, default: Optional[str] = None) -> str:
+        """Get env var with optional fallback (for Railway project-level vars)."""
+        val = os.environ.get(key)
+        if val:
+            return val
+        if fallback_key:
+            val = os.environ.get(fallback_key)
+            if val:
+                return val
+        if default is not None:
+            return default
+        raise KeyError(key)
+
+    @classmethod
     def from_env(cls) -> "Config":
         """Load configuration from environment variables"""
         return cls(
-            QA_TELEGRAM_BOT_TOKEN=os.environ["QA_TELEGRAM_BOT_TOKEN"],
-            QA_TEST_GROUP_ID=int(os.environ["QA_TEST_GROUP_ID"]),
+            QA_TELEGRAM_BOT_TOKEN=cls._get_env("QA_TELEGRAM_BOT_TOKEN"),  # Must be QA bot's own token
+            QA_TEST_GROUP_ID=int(cls._get_env("QA_TEST_GROUP_ID", fallback_key="TEST_GROUP_ID", default="-1003269114897")),
             COPILOT_BOT_USERNAME=os.environ.get("COPILOT_BOT_USERNAME", "API_Assistant_V2_bot"),
             ADMIN_USERNAME=os.environ.get("ADMIN_USERNAME", "DecentralizedJM"),
-            QA_GEMINI_API_KEY=os.environ["QA_GEMINI_API_KEY"],
+            QA_GEMINI_API_KEY=cls._get_env("QA_GEMINI_API_KEY", fallback_key="GEMINI_API_KEY"),
             GEMINI_MODEL=os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
             REDIS_URL=os.environ.get("REDIS_URL"),
             RESPONSE_TIMEOUT=int(os.environ.get("RESPONSE_TIMEOUT", "60")),

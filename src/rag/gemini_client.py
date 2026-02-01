@@ -375,11 +375,26 @@ limiter.wait_if_needed()
         if not documents:
             return []
         
+        # Check if query looks like an error log (bypass validation for error docs)
+        query_has_error_pattern = (
+            '"code"' in query and '"msg"' in query or
+            re.search(r'-\d{4}\b', query) or  # Negative error codes like -1111
+            re.search(r'\b(400|401|403|404|429|500)\b', query)  # HTTP status codes
+        )
+        
         # If only 1-2 docs, validate them individually
         # If more, batch validate for efficiency
         validated_docs = []
         
         for doc in documents:
+            source = doc.get('metadata', {}).get('filename', '')
+            
+            # Auto-include error-code docs when query looks like an error
+            if query_has_error_pattern and 'error' in source.lower():
+                doc['relevancy_score'] = 0.9  # High relevancy for error docs
+                validated_docs.append(doc)
+                logger.debug(f"Document auto-included (error pattern match): {source}")
+                continue
             # Check cache first
             if self.cache:
                 cached = self.cache.get_validation(query, doc)

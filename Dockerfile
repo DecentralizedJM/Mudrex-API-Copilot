@@ -1,5 +1,10 @@
 # Dockerfile for Mudrex API Bot
+# Build timestamp: 2026-02-01-13:00
 FROM python:3.11-slim
+
+# Force rebuild - change timestamp above
+ARG BUILD_DATE=2026-02-01-13:00
+RUN echo "Building at: $BUILD_DATE"
 
 WORKDIR /app
 

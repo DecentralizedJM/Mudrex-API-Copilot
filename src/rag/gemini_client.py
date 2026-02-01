@@ -91,9 +91,13 @@ class GeminiClient:
 - -1121: Invalid symbol (use BTCUSDT, not BTC-USDT)
 - -1022: Auth issue
 - Rate limit: 2 req/sec
+- When error codes are in the documentation (error-codes.md, error-handling.md), cite them confidently
+- Say "According to Mudrex error codes" or "Per Mudrex API error documentation" when referencing error docs
+- Don't hedge with "general pattern" or "standard trading API" when Mudrex error codes are present
 
 ## WHEN YOU DON'T KNOW
 - NEVER say "it's not in my documents" or "not in my docs" or "I don't have that in my Mudrex docs"
+- NEVER say "general pattern" or "standard trading API behavior" when Mudrex error codes/docs are in context
 - Instead: "Couldn't find that. Docs: https://docs.trade.mudrex.com — @DecentralizedJM can help with specifics."
 - Keep it brief. Link to docs. Tag @DecentralizedJM.
 - Don't guess or make things up.
@@ -1008,10 +1012,15 @@ Generate a helpful response:"""
         
         formatted = []
         legacy_warning_added = False
+        has_error_docs = False
         
         for i, doc in enumerate(documents[:5], 1):  # Max 5 docs
             source = doc.get('metadata', {}).get('filename', 'docs')
             content = doc.get('document', '')[:800]  # Limit each doc
+            
+            # Check if this is an error-code doc
+            if 'error' in source.lower() and ('code' in source.lower() or 'handling' in source.lower()):
+                has_error_docs = True
             
             # Check if this is legacy documentation (old API base URL)
             is_legacy = (
@@ -1026,6 +1035,10 @@ Generate a helpful response:"""
                 legacy_warning_added = True
             
             formatted.append(f"[{source}]\n{content}")
+        
+        # Add note when error-code docs are present to encourage confident citation
+        if has_error_docs:
+            formatted.insert(0, "📋 NOTE: Error-code documentation is present below. Cite these Mudrex error codes confidently (e.g., 'According to Mudrex error codes' or 'Per Mudrex API error documentation'). Do not hedge with 'general pattern' or 'standard trading API' language.")
         
         return "\n\n".join(formatted)
     

@@ -389,24 +389,53 @@ class VectorStore:
             ]
             query_filter = models.Filter(must=conditions)
         
-        # Search Qdrant
-        results = self.client.search(
-            collection_name=self.collection_name,
-            query_vector=query_embedding,
-            query_filter=query_filter,
+        # Search Qdrant - use HTTP API directly (most reliable)
+        from qdrant_client.http import models as rest_models
+        
+        search_request = rest_models.SearchRequest(
+            vector=query_embedding,
+            filter=query_filter,
             limit=top_k,
             score_threshold=config.SIMILARITY_THRESHOLD,
         )
         
-        # Format results
+        try:
+            search_result = self.client.http.collections_api.search_points(
+                collection_name=self.collection_name,
+                search_request=search_request
+            )
+            # Extract points from result (handle different response formats)
+            if hasattr(search_result, 'result'):
+                results = search_result.result.points if hasattr(search_result.result, 'points') else []
+            elif hasattr(search_result, 'points'):
+                results = search_result.points
+            else:
+                results = list(search_result) if search_result else []
+        except Exception as e:
+            logger.error(f"Qdrant search error: {e}", exc_info=True)
+            results = []
+        
+        # Format results (handle both direct API and HTTP API response formats)
         formatted_results = []
         for result in results:
-            payload = result.payload
+            # Handle different result formats
+            if hasattr(result, 'payload'):
+                payload = result.payload
+                score = getattr(result, 'score', 0.0)
+            elif isinstance(result, dict):
+                payload = result.get('payload', {})
+                score = result.get('score', 0.0)
+            else:
+                # Try to extract payload and score from result object
+                payload = getattr(result, 'payload', {})
+                score = getattr(result, 'score', 0.0)
+            
             formatted_results.append({
-                'document': payload.get('document', ''),
-                'metadata': {k: v for k, v in payload.items() if k not in ['document', 'original_id']},
-                'similarity': result.score,
-                'distance': 1 - result.score
+                'document': payload.get('document', '') if isinstance(payload, dict) else '',
+                'metadata': {k: v for k, v in (payload.items() if isinstance(payload, dict) else {}).items() 
+                            if k not in ['document', 'original_id']},
+                'similarity': float(score),
+                'distance': 1 - float(score)
             })
         
         logger.info(f"Found {len(formatted_results)} relevant documents for query (Qdrant)")
@@ -478,22 +507,50 @@ class VectorStore:
         query_embedding = self._get_embedding(query)
         
         if self.use_qdrant:
-            # Search with lower threshold
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_embedding,
+            # Search with lower threshold using HTTP API
+            from qdrant_client.http import models as rest_models
+            
+            search_request = rest_models.SearchRequest(
+                vector=query_embedding,
                 limit=top_k,
                 score_threshold=min_threshold,
             )
             
+            try:
+                search_result = self.client.http.collections_api.search_points(
+                    collection_name=self.collection_name,
+                    search_request=search_request
+                )
+                # Extract points from result
+                if hasattr(search_result, 'result'):
+                    results = search_result.result.points if hasattr(search_result.result, 'points') else []
+                elif hasattr(search_result, 'points'):
+                    results = search_result.points
+                else:
+                    results = list(search_result) if search_result else []
+            except Exception as e:
+                logger.error(f"Qdrant search_all_relevant error: {e}", exc_info=True)
+                results = []
+            
             formatted_results = []
             for result in results:
-                payload = result.payload
+                # Handle different result formats
+                if hasattr(result, 'payload'):
+                    payload = result.payload
+                    score = getattr(result, 'score', 0.0)
+                elif isinstance(result, dict):
+                    payload = result.get('payload', {})
+                    score = result.get('score', 0.0)
+                else:
+                    payload = getattr(result, 'payload', {})
+                    score = getattr(result, 'score', 0.0)
+                
                 formatted_results.append({
-                    'document': payload.get('document', ''),
-                    'metadata': {k: v for k, v in payload.items() if k not in ['document', 'original_id']},
-                    'similarity': result.score,
-                    'distance': 1 - result.score
+                    'document': payload.get('document', '') if isinstance(payload, dict) else '',
+                    'metadata': {k: v for k, v in (payload.items() if isinstance(payload, dict) else {}).items() 
+                                if k not in ['document', 'original_id']},
+                    'similarity': float(score),
+                    'distance': 1 - float(score)
                 })
             
             logger.info(f"Found {len(formatted_results)} documents with lower threshold ({min_threshold}) (Qdrant)")

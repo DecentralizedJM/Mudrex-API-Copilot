@@ -22,10 +22,11 @@ from telegram.ext import (
     filters,
 )
 
-from ..config import Config
-from ..qa.test_bank import TestBank, TestCase
-from ..qa.grader import ResponseGrader, GradeResult
-from ..qa.reporter import Reporter, ReportManager, DailySummary
+# Absolute imports (app runs as python main.py from qa-watchdog root)
+from config import Config
+from qa.test_bank import TestBank, TestCase
+from qa.grader import ResponseGrader, GradeResult
+from qa.reporter import Reporter, ReportManager, DailySummary
 
 logger = logging.getLogger(__name__)
 

@@ -15,8 +15,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from ..bot.watchdog import QAWatchdogBot
-from ..config import Config
+# Absolute imports (app runs as python main.py from qa-watchdog root)
+from bot.watchdog import QAWatchdogBot
+from config import Config
 
 logger = logging.getLogger(__name__)
 

@@ -53,6 +53,10 @@ class Config:
     # Run a spot check on startup to verify setup (set RUN_QA_ON_STARTUP=1)
     RUN_QA_ON_STARTUP: bool = False
     
+    # Direct API - Telegram doesn't deliver bot-to-bot messages, so call Copilot HTTP API
+    COPILOT_QA_URL: Optional[str] = None  # e.g. https://mudrex-api-copilot.up.railway.app
+    QA_API_SECRET: Optional[str] = None  # Must match Copilot's QA_API_SECRET
+    
     @classmethod
     def _get_env(cls, key: str, fallback_key: Optional[str] = None, fallback_keys: Optional[list[str]] = None, default: Optional[str] = None) -> str:
         """Get env var with optional fallbacks (Railway may use different names)."""
@@ -97,6 +101,8 @@ class Config:
             HEALTH_PORT=int(os.environ.get("PORT", os.environ.get("HEALTH_PORT", "8081"))),
             BOT_STARTUP_DELAY=int(os.environ.get("BOT_STARTUP_DELAY", "30")),
             RUN_QA_ON_STARTUP=os.environ.get("RUN_QA_ON_STARTUP", "").lower() in ("1", "true", "yes"),
+            COPILOT_QA_URL=os.environ.get("COPILOT_QA_URL") or None,
+            QA_API_SECRET=os.environ.get("QA_API_SECRET") or None,
         )
     
     def validate(self) -> None:

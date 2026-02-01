@@ -11,13 +11,20 @@ import time
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Header, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import uvicorn
 
 from .config import config
 
 logger = logging.getLogger(__name__)
+
+
+class QAQueryRequest(BaseModel):
+    """Request body for QA API"""
+    question: str
+    api_key: Optional[str] = None
 
 # Version info
 __version__ = "2.0.0"
@@ -250,6 +257,32 @@ async def metrics():
             content="# Metrics not available\n",
             media_type="text/plain"
         )
+
+
+@app.post("/api/qa-query")
+async def handle_qa_query(request: QAQueryRequest, x_api_key: Optional[str] = Header(None, alias="X-Api-Key")):
+    """
+    QA Watchdog endpoint - direct RAG query.
+    Telegram doesn't deliver bot-to-bot messages, so QA Watchdog calls this instead.
+    Requires QA_API_SECRET (header X-Api-Key or body api_key).
+    """
+    api_key = request.api_key or x_api_key
+    if config.QA_API_SECRET and api_key != config.QA_API_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    
+    if not _rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG pipeline not initialized")
+    
+    try:
+        result = _rag_pipeline.query(
+            request.question,
+            chat_history=None,
+            chat_id=None,
+        )
+        return {"answer": result.get("answer", ""), "success": True}
+    except Exception as e:
+        logger.error(f"QA query failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/stats")

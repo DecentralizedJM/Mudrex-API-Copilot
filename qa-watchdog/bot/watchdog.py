@@ -293,37 +293,38 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
     
     async def _run_single_test(self, test_case: TestCase) -> GradeResult:
         """Run a single test and grade the response"""
-        # Send the question
+        # Send the question to group (for visibility/logging)
         question_with_mention = f"{test_case.question} @{self.config.COPILOT_BOT_USERNAME}"
+        message_id = None
         
         try:
             sent_message = await self.bot.send_message(
                 chat_id=self.config.QA_TEST_GROUP_ID,
                 text=question_with_mention
             )
-            
-            sent_time = time.time()
             message_id = sent_message.message_id
+            sent_time = time.time()
             
-            # Track this test
+            # DIRECT API: Telegram doesn't deliver bot-to-bot messages
+            if self.config.COPILOT_QA_URL:
+                result = await self._run_via_api(test_case, sent_time)
+                return result
+            
+            # TELEGRAM: Wait for reply (when user quotes or Copilot responds)
             self._pending_tests[message_id] = (test_case, sent_time)
             self._response_events[message_id] = asyncio.Event()
             
-            # Wait for response
             try:
                 await asyncio.wait_for(
                     self._response_events[message_id].wait(),
                     timeout=self.config.RESPONSE_TIMEOUT
                 )
                 
-                # Got a response!
                 response_message = self._responses.get(message_id)
                 response_time = time.time() - sent_time
                 
                 if response_message:
                     response_text = response_message.text
-                    
-                    # Check if it's an error response
                     error_indicators = ["Something went wrong", "try again", "error", "timeout"]
                     is_error = any(ind.lower() in response_text.lower() for ind in error_indicators)
                     
@@ -337,11 +338,8 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
                             message_id=response_message.message_id
                         )
                 else:
-                    # Event fired but no message (shouldn't happen)
                     result = self.grader.grade_timeout(test_case, self.config.RESPONSE_TIMEOUT)
-                    
             except asyncio.TimeoutError:
-                # No response within timeout
                 result = self.grader.grade_timeout(test_case, self.config.RESPONSE_TIMEOUT)
             
             return result
@@ -358,13 +356,61 @@ Copilot: @{self.config.COPILOT_BOT_USERNAME}
             )
         
         finally:
-            # Cleanup
-            if message_id in self._pending_tests:
-                del self._pending_tests[message_id]
-            if message_id in self._response_events:
-                del self._response_events[message_id]
-            if message_id in self._responses:
-                del self._responses[message_id]
+            if message_id:
+                self._pending_tests.pop(message_id, None)
+                self._response_events.pop(message_id, None)
+                self._responses.pop(message_id, None)
+    
+    async def _run_via_api(self, test_case: TestCase, sent_time: float) -> GradeResult:
+        """Call Copilot API directly - Telegram doesn't deliver bot-to-bot messages"""
+        import aiohttp
+        
+        url = f"{self.config.COPILOT_QA_URL.rstrip('/')}/api/qa-query"
+        payload = {"question": test_case.question}
+        headers = {"Content-Type": "application/json"}
+        if self.config.QA_API_SECRET:
+            payload["api_key"] = self.config.QA_API_SECRET
+            headers["X-Api-Key"] = self.config.QA_API_SECRET
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=self.config.RESPONSE_TIMEOUT)) as resp:
+                    response_time = time.time() - sent_time
+                    if resp.status != 200:
+                        text = await resp.text()
+                        return GradeResult(
+                            test_case=test_case,
+                            response=f"[API {resp.status}]: {text[:500]}",
+                            response_time=response_time,
+                            passed=False,
+                            score=0,
+                            issues=[f"API returned {resp.status}"],
+                        )
+                    data = await resp.json()
+                    answer = data.get("answer", "")
+                    if not answer:
+                        return GradeResult(
+                            test_case=test_case,
+                            response="[API: empty answer]",
+                            response_time=response_time,
+                            passed=False,
+                            score=0,
+                            issues=["API returned empty answer"],
+                        )
+                    return self.grader.grade(test_case, answer, response_time)
+        except asyncio.TimeoutError:
+            return self.grader.grade_timeout(test_case, self.config.RESPONSE_TIMEOUT)
+        except Exception as e:
+            response_time = time.time() - sent_time
+            logger.error(f"API call failed for {test_case.id}: {e}")
+            return GradeResult(
+                test_case=test_case,
+                response=f"[API ERROR: {str(e)}]",
+                response_time=response_time,
+                passed=False,
+                score=0,
+                issues=[f"API call failed: {str(e)}"],
+            )
     
     async def _report_failure(self, result: GradeResult) -> None:
         """Report a test failure"""

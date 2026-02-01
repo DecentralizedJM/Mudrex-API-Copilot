@@ -912,6 +912,16 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             not update.message.reply_to_message.from_user.is_bot and
             bot_mentioned
         )
+        # Quote from QA Watchdog: Reply to Stalker's question + mention bot
+        # Stalker is a bot, so regular quote+mention (non-bot) fails
+        is_quote_from_qa = (
+            update.message.reply_to_message and
+            update.message.reply_to_message.text and
+            update.message.reply_to_message.from_user and
+            config.QA_WATCHDOG_BOT_USERNAME and
+            (update.message.reply_to_message.from_user.username or "").lower() == config.QA_WATCHDOG_BOT_USERNAME.lower().lstrip("@") and
+            bot_mentioned
+        )
         
         # REACTIVE ONLY: Respond ONLY when explicitly engaged
         # 1. Bot is @mentioned
@@ -932,8 +942,8 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         else:
             cleaned_message = message.strip()
         
-        # For quote+mention: include the quoted message for context
-        if is_quote_with_mention and update.message.reply_to_message.text:
+        # For quote+mention (or quote from QA Watchdog): use the quoted message
+        if (is_quote_with_mention or is_quote_from_qa) and update.message.reply_to_message.text:
             quoted_text = update.message.reply_to_message.text
             # If user just tagged bot without adding their own question, use the quoted message
             if not cleaned_message or cleaned_message.lower() in ['help', 'please', 'can you help', '?']:
@@ -1002,7 +1012,7 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             await self._send_response(update, answer)
             return
         
-        logger.info(f"[REACTIVE] {user_name} in {chat_id}: {message[:50]}... | reply_to_bot={is_reply_to_bot} | mentioned={bot_mentioned} | quote_mention={is_quote_with_mention}")
+        logger.info(f"[REACTIVE] {user_name} in {chat_id}: {message[:50]}... | reply_to_bot={is_reply_to_bot} | mentioned={bot_mentioned} | quote={is_quote_with_mention} | qa_quote={is_quote_from_qa}")
         
         
         await update.message.chat.send_action(ChatAction.TYPING)

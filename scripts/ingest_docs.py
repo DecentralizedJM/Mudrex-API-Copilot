@@ -34,7 +34,7 @@ def main():
         logger.info("Please create a 'docs/' folder and add your API documentation")
         sys.exit(1)
     
-    # Check if docs directory has files (rglob to include subdirs: training_materials, legacy, etc.)
+    # Check if docs directory has files (rglob to include subdirs: training_materials, etc.)
     doc_files = list(docs_dir.rglob("*.md")) + list(docs_dir.rglob("*.txt")) + list(docs_dir.rglob("*.rst"))
     if not doc_files:
         logger.error(f"No documentation files found in {docs_dir}")

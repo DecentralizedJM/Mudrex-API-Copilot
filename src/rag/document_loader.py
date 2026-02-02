@@ -36,11 +36,6 @@ class DocumentLoader:
         documents = []
         
         for file_path in docs_path.rglob('*'):
-            # Skip legacy directory - contains deprecated API docs that cause hallucinations
-            if 'legacy' in file_path.parts:
-                logger.debug(f"Skipping legacy file: {file_path.name}")
-                continue
-                
             if file_path.is_file() and file_path.suffix in extensions:
                 try:
                     content = file_path.read_text(encoding='utf-8')

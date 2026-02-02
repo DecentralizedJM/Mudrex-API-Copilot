@@ -99,7 +99,7 @@ class VectorStore:
             self._init_pickle_fallback()
     
     def _init_pickle_fallback(self):
-        """Initialize legacy pickle-based storage (fallback)"""
+        """Initialize pickle-based storage (fallback when Qdrant not configured)"""
         logger.warning("Using pickle-based storage (NOT recommended for production)")
         logger.warning("Set QDRANT_URL and QDRANT_API_KEY for production use")
         

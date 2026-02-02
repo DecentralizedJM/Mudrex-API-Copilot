@@ -21,7 +21,7 @@ If the bot replies with *"Hit a snag on my side (could be temporary)..."*, it us
 
 1. **Ingest from project root**
    - Run: `python3 scripts/ingest_docs.py` from the **project root**.
-   - The script loads from `docs/` and **all subdirs** (`docs/training_materials/`, `docs/legacy/`, etc.).
+   - The script loads from `docs/` and **all subdirs** (e.g. `docs/training_materials/`).
 
 2. **Where the vector store lives**
    - Default: `./data/chroma/vectors.pkl` (relative to the **current working directory** when the bot runs).

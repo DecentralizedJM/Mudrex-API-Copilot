@@ -107,6 +107,10 @@ async def async_main():
                     logger.info(f"✓ Successfully auto-ingested {num_chunks} chunks")
                     stats = rag_pipeline.get_stats()
                     logger.info(f"✓ Vector store now has {stats['total_documents']} documents")
+                    # Clear semantic cache so old cached answers (e.g. from before re-ingest) are not returned
+                    if rag_pipeline.semantic_cache:
+                        rag_pipeline.semantic_cache.clear()
+                        logger.info("Cleared semantic cache (stale answers from previous docs removed)")
                 else:
                     logger.warning("Ingestion returned 0 chunks. Check docs directory.")
             except Exception as e:

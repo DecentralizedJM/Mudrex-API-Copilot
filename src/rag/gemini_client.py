@@ -826,6 +826,7 @@ Return ONLY the transformed query, nothing else."""
             'candlestick': market_data_not_available,
             'ohlcv': market_data_not_available,
             'ticker': market_data_not_available,
+            'tickets': market_data_not_available,  # common typo for tickers
             '/depth': market_data_not_available,
             'orderbook': market_data_not_available,
             'order book': market_data_not_available,
@@ -1063,35 +1064,19 @@ Generate a helpful response:"""
         return "\n".join(parts)
     
     def _format_context(self, documents: List[Dict[str, Any]]) -> str:
-        """Format context documents"""
+        """Format context documents (only current Mudrex API docs)"""
         if not documents:
             return "No specific documentation found."
         
         formatted = []
-        legacy_warning_added = False
         has_error_docs = False
         
         for i, doc in enumerate(documents[:5], 1):  # Max 5 docs
             source = doc.get('metadata', {}).get('filename', 'docs')
             content = doc.get('document', '')[:800]  # Limit each doc
             
-            # Check if this is an error-code doc
             if 'error' in source.lower() and ('code' in source.lower() or 'handling' in source.lower()):
                 has_error_docs = True
-            
-            # Check if this is legacy documentation (old API base URL)
-            # Note: error-codes.md is NOT legacy - error codes apply to current API too
-            is_error_doc = 'error' in source.lower() and ('code' in source.lower() or 'handling' in source.lower())
-            is_legacy = not is_error_doc and (
-                'https://api.mudrex.com/api/v1' in content or
-                'api.mudrex.com/api/v1' in content or
-                'legacy' in source.lower() or
-                'LEGACY' in content[:200]  # Check first 200 chars for legacy warning
-            )
-            
-            if is_legacy and not legacy_warning_added:
-                formatted.append("⚠️ WARNING: Some documents below are from the LEGACY API (https://api.mudrex.com/api/v1) and do NOT apply to the current Futures API (https://trade.mudrex.com/fapi/v1). Do NOT claim endpoints from legacy docs exist in the current API.")
-                legacy_warning_added = True
             
             formatted.append(f"[{source}]\n{content}")
         

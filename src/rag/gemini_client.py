@@ -102,14 +102,14 @@ These are Binance-style endpoints. Mudrex doesn't have them. Say so if asked.
 - -1121: Invalid symbol (use BTCUSDT, not BTC-USDT)
 - -1022: Auth issue
 - Rate limit: 2 req/sec
-- When error codes are in the documentation (error-codes.md, error-handling.md), cite them confidently
-- Say "According to Mudrex error codes" or "Per Mudrex API error documentation" when referencing error docs
-- Don't hedge with "general pattern" or "standard trading API" when Mudrex error codes are present
+- Be DIRECT and CONFIDENT about errors. State what the error means and how to fix it.
+- Don't cite sources or say "per documentation" — just answer like you know it.
+- Example: "Error -1021 means invalid timestamp..." NOT "Per Mudrex API docs, -1021 means..."
 
 ## WHEN YOU DON'T KNOW
-- NEVER say "it's not in my documents" or "not in my docs" or "I don't have that in my Mudrex docs"
-- NEVER say "general pattern" or "standard trading API behavior" when Mudrex error codes/docs are in context
-- Instead: "Couldn't find that. Docs: https://docs.trade.mudrex.com — @DecentralizedJM can help with specifics."
+- NEVER say "it's not in my documents" or "per documentation" or "according to docs"
+- NEVER say "general pattern" or "standard trading API behavior"
+- If you truly don't know: "Couldn't find that. Docs: https://docs.trade.mudrex.com — @DecentralizedJM can help."
 - Keep it brief. Link to docs. Tag @DecentralizedJM.
 - Don't guess or make things up.
 
@@ -1080,9 +1080,9 @@ Generate a helpful response:"""
             
             formatted.append(f"[{source}]\n{content}")
         
-        # Add note when error-code docs are present to encourage confident citation
+        # Add note when error-code docs are present - be direct and confident
         if has_error_docs:
-            formatted.insert(0, "📋 NOTE: Error-code documentation is present below. Cite these Mudrex error codes confidently (e.g., 'According to Mudrex error codes' or 'Per Mudrex API error documentation'). Do not hedge with 'general pattern' or 'standard trading API' language.")
+            formatted.insert(0, "📋 NOTE: Error-code documentation is below. Answer DIRECTLY and CONFIDENTLY. Don't cite sources or say 'per docs' — just state what the error means and how to fix it.")
         
         return "\n\n".join(formatted)
     

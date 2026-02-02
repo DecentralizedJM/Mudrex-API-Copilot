@@ -912,16 +912,6 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             not update.message.reply_to_message.from_user.is_bot and
             bot_mentioned
         )
-        # Quote from QA Watchdog: Reply to Stalker's question + mention bot
-        # Stalker is a bot, so regular quote+mention (non-bot) fails
-        is_quote_from_qa = (
-            update.message.reply_to_message and
-            update.message.reply_to_message.text and
-            update.message.reply_to_message.from_user and
-            config.QA_WATCHDOG_BOT_USERNAME and
-            (update.message.reply_to_message.from_user.username or "").lower() == config.QA_WATCHDOG_BOT_USERNAME.lower().lstrip("@") and
-            bot_mentioned
-        )
         
         # REACTIVE ONLY: Respond ONLY when explicitly engaged
         # 1. Bot is @mentioned
@@ -942,8 +932,8 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         else:
             cleaned_message = message.strip()
         
-        # For quote+mention (or quote from QA Watchdog): use the quoted message
-        if (is_quote_with_mention or is_quote_from_qa) and update.message.reply_to_message.text:
+        # For quote+mention: use the quoted message
+        if is_quote_with_mention and update.message.reply_to_message.text:
             quoted_text = update.message.reply_to_message.text
             # If user just tagged bot without adding their own question, use the quoted message
             if not cleaned_message or cleaned_message.lower() in ['help', 'please', 'can you help', '?']:
@@ -970,17 +960,8 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             logger.warning(f"Unauthorized group: {chat_id}")
             return
         
-        # QA Watchdog / Stalker bot: always respond, bypass rate limit
-        is_qa_watchdog = False
-        if config.QA_WATCHDOG_BOT_USERNAME and update.effective_user:
-            sender_username = (update.effective_user.username or "").lower()
-            qa_username = config.QA_WATCHDOG_BOT_USERNAME.lower().lstrip("@")
-            if sender_username == qa_username:
-                is_qa_watchdog = True
-                logger.info(f"[QA] Responding to QA Watchdog (@{sender_username}) question")
-        
-        # Rate limiting (per user + per group + global) - skip for QA Watchdog
-        if not is_qa_watchdog and not self.rate_limiter.is_allowed(chat_id, user_id):
+        # Rate limiting (per user + per group + global)
+        if not self.rate_limiter.is_allowed(chat_id, user_id):
             remaining = self.rate_limiter.get_remaining(chat_id, user_id)
             if remaining.get("user", 1) == 0:
                 await update.message.reply_text(
@@ -1012,7 +993,7 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             await self._send_response(update, answer)
             return
         
-        logger.info(f"[REACTIVE] {user_name} in {chat_id}: {message[:50]}... | reply_to_bot={is_reply_to_bot} | mentioned={bot_mentioned} | quote={is_quote_with_mention} | qa_quote={is_quote_from_qa}")
+        logger.info(f"[REACTIVE] {user_name} in {chat_id}: {message[:50]}... | reply_to_bot={is_reply_to_bot} | mentioned={bot_mentioned} | quote={is_quote_with_mention}")
         
         
         await update.message.chat.send_action(ChatAction.TYPING)

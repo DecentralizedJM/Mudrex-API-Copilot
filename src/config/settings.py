@@ -31,10 +31,6 @@ class Config:
     # Optional - Access Control
     ALLOWED_CHAT_IDS: Optional[List[int]] = None  # None = all chats allowed
     ADMIN_USER_IDS: Optional[List[int]] = None  # Admin users for escalation
-    # QA Watchdog bot - always respond to its mentions (e.g. Stalker 👀), bypass rate limit
-    QA_WATCHDOG_BOT_USERNAME: Optional[str] = None  # e.g. "StalkerQA_bot" - from @BotFather
-    # QA API - for direct QA calls (Telegram doesn't deliver bot-to-bot messages)
-    QA_API_SECRET: Optional[str] = None  # Shared secret for POST /api/qa-query
     
     # Gemini AI Settings (NEW SDK)
     GEMINI_MODEL: str = "gemini-3-flash-preview"  # Latest model
@@ -135,8 +131,6 @@ class Config:
             # Access Control
             ALLOWED_CHAT_IDS=chat_ids,
             ADMIN_USER_IDS=admin_ids,
-            QA_WATCHDOG_BOT_USERNAME=os.getenv("QA_WATCHDOG_BOT_USERNAME") or None,
-            QA_API_SECRET=os.getenv("QA_API_SECRET") or None,
             
             # Gemini
             GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),

@@ -72,6 +72,17 @@ class GeminiClient:
 2. Debug first: See error? Show the fix.
 3. Facts only: Use Mudrex docs. Don't guess.
 4. Be honest: If Mudrex doesn't support it, say so.
+5. NEVER HALLUCINATE ENDPOINTS. Only mention endpoints that exist in the provided context.
+
+## CRITICAL - ENDPOINTS THAT DO NOT EXIST
+Mudrex Futures API does NOT have these (don't claim they exist):
+- /klines (no candlestick data)
+- /ticker or /ticker/24hr (no ticker endpoints)
+- /depth (no orderbook)
+- /exchangeInfo
+- WebSockets
+- Webhooks
+These are Binance-style endpoints. Mudrex doesn't have them. Say so if asked.
 
 ## RESPONSE STYLE
 - SHORT. 2-4 sentences + code.
@@ -102,12 +113,20 @@ class GeminiClient:
 - Keep it brief. Link to docs. Tag @DecentralizedJM.
 - Don't guess or make things up.
 
-## LEGACY DOCS (internal — don't mention to users)
-- If doc shows `https://api.mudrex.com/api/v1` = LEGACY, ignore it.
-- Current API = `https://trade.mudrex.com/fapi/v1` only.
-- Don't claim endpoints exist unless in current docs.
-- If asked about legacy endpoints: "Couldn't find that. Docs: https://docs.trade.mudrex.com — @DecentralizedJM can help."
-- Never mention "legacy" to users.
+## MUDREX ACTUAL ENDPOINTS (the ONLY ones that exist)
+Base: `https://trade.mudrex.com/fapi/v1`
+- GET /futures — list trading pairs
+- GET /futures/{asset_id} — asset details
+- GET/POST /futures/{asset_id}/leverage — leverage
+- POST /futures/{asset_id}/order — place order
+- GET/DELETE /futures/orders/{order_id} — orders
+- GET /futures/orders, /futures/orders/history — order lists
+- GET /futures/positions — open positions
+- POST /futures/positions/{id}/riskorder — SL/TP
+- POST /futures/positions/{id}/close — square off
+- GET /wallet/funds, /futures/funds — balances
+
+If an endpoint isn't in this list or the provided docs, it doesn't exist. Say so.
 
 ## WHEN USER SHARES API SECRET
 - If the user's message contains what looks like a shared API secret (e.g. they pasted their key or said "my API secret is ..." or "api key is ..."), you MUST end your response with this warning (include it verbatim):
@@ -789,7 +808,30 @@ Return ONLY the transformed query, nothing else."""
         """
         query_lower = query.lower()
         
+        # Market data endpoints that DON'T exist in Mudrex Futures API
+        market_data_not_available = (
+            "**Mudrex Futures API does NOT have market data endpoints.**\n\n"
+            "No `/klines`, `/ticker`, `/depth`, `/exchangeInfo` — those are Binance-style endpoints that Mudrex doesn't provide.\n\n"
+            "**What Mudrex DOES have:**\n"
+            "- `GET /futures` — list available trading pairs\n"
+            "- `GET /futures/{asset_id}` — get asset details\n"
+            "- Orders, positions, wallet endpoints\n\n"
+            "For OHLCV/candlestick data, use a third-party source (TradingView, CoinGecko, Binance API)."
+        )
+        
         missing_features = {
+            # Market data endpoints - NOT available in Mudrex
+            'kline': market_data_not_available,
+            'klines': market_data_not_available,
+            'candlestick': market_data_not_available,
+            'ohlcv': market_data_not_available,
+            'ticker': market_data_not_available,
+            '/depth': market_data_not_available,
+            'orderbook': market_data_not_available,
+            'order book': market_data_not_available,
+            'exchangeinfo': market_data_not_available,
+            'market data': market_data_not_available,
+            # Other missing features
             'tradingview': "TradingView integration isn't available yet — it's on the roadmap. Stay tuned!",
             'trading view': "TradingView integration isn't available yet — it's on the roadmap. Stay tuned!",
             'webhook': "Mudrex doesn't support webhooks yet — only REST APIs. It's on our roadmap though!",

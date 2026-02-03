@@ -92,12 +92,23 @@ class RAGPipeline:
         except Exception as e:
             return False, None, str(e)
     
-    def _get_connectivity_check_reply(self, question: str) -> Optional[Dict[str, Any]]:
-        """If question is about API down/connectivity, ping and return reply dict or None."""
+    def is_connectivity_question(self, question: str) -> bool:
+        """True if the user is asking whether the API is down / connectivity check."""
         q = question.lower()
-        if not any(k in q for k in ("api down", "api is down", "unable to connect", "connectivity", "connection", "is mudrex api", "api not working", "can't connect", "cannot connect", "mcp", "check.*connection", "check.*live")):
-            return None
-        logger.info("Connectivity question: pinging Mudrex API")
+        return any(
+            k in q for k in (
+                "api down", "api is down", "unable to connect", "connectivity",
+                "connection", "is mudrex api", "api not working", "can't connect",
+                "cannot connect", "mcp", "check connection", "check live", "is api up"
+            )
+        )
+
+    def run_connectivity_check(self) -> str:
+        """
+        Ping Mudrex API and return the second message (status + script + footer).
+        Call this after sending "Let me check." and showing typing.
+        """
+        logger.info("Connectivity check: pinging Mudrex API")
         up, status_code, detail = self._ping_mudrex_api()
         if up:
             status_line = "I just checked — the Mudrex API is **up** and reachable."
@@ -122,7 +133,14 @@ class RAGPipeline:
                 "print(r.status_code, r.json())\n"
                 "```"
             )
-        answer = f"Let me check.\n\n{status_line}\n\n{script}"
+        footer = "Try the snippet above. If you get an error, share the error code and I can help."
+        return f"{status_line}\n\n{script}\n\n_{footer}_"
+
+    def _get_connectivity_check_reply(self, question: str) -> Optional[Dict[str, Any]]:
+        """If question is about API down/connectivity, return reply dict (used only when not using two-step flow)."""
+        if not self.is_connectivity_question(question):
+            return None
+        answer = self.run_connectivity_check()
         return {
             "answer": answer,
             "sources": [{"filename": "Mudrex API status (live check)", "similarity": 1.0}],

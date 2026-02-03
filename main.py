@@ -7,6 +7,7 @@ Licensed under MIT License
 """
 import asyncio
 import logging
+import signal
 import sys
 import os
 from pathlib import Path
@@ -161,9 +162,18 @@ async def async_main():
         scheduler = setup_scheduler(bot, rag_pipeline, docs_dir)
         scheduler.start()
     
+    # Shutdown event: SIGTERM/SIGINT set this so we stop polling immediately (critical for Railway deploy)
+    shutdown_event = asyncio.Event()
     try:
-        # Delay before starting bot so previous instance can stop polling (avoids Telegram Conflict on deploy)
-        delay = int(os.getenv("BOT_STARTUP_DELAY", "60" if os.getenv("RAILWAY_ENVIRONMENT") else "0"))
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, lambda s=sig: shutdown_event.set())
+    except NotImplementedError:
+        pass  # Windows has no add_signal_handler
+
+    try:
+        # Short delay so previous instance can release getUpdates (Railway: overlap=0, draining=30)
+        delay = int(os.getenv("BOT_STARTUP_DELAY", "25" if os.getenv("RAILWAY_ENVIRONMENT") else "0"))
         if delay > 0:
             logger.info(f"Waiting {delay}s before starting bot (avoids Conflict during deploy)...")
             await asyncio.sleep(delay)
@@ -175,8 +185,8 @@ async def async_main():
                 break
             except Exception as e:
                 if ("Conflict" in str(e) or "getUpdates" in str(e)) and attempt == 0:
-                    logger.warning("Conflict on first start; waiting 45s then retrying once...")
-                    await asyncio.sleep(45)
+                    logger.warning("Conflict on first start; waiting 30s then retrying once...")
+                    await asyncio.sleep(30)
                     continue
                 raise
         
@@ -187,8 +197,8 @@ async def async_main():
         logger.info("=" * 60)
         logger.info("")
         
-        # Keep running until interrupted
-        await asyncio.Event().wait()
+        # Keep running until SIGTERM/SIGINT (Railway sends SIGTERM on deploy – we stop polling in finally)
+        await shutdown_event.wait()
         
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")

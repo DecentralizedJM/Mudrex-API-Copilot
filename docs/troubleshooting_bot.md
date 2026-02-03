@@ -9,10 +9,12 @@ This guide covers common errors encountered when running the Mudrex API trading 
 **Cause**: You are running **two instances** of the same bot simultaneously.
 - Example: You have one instance running on your laptop and another on a server (Railway/Heroku).
 - Example: You opened two terminal windows and ran `python main.py` in both.
+- **Railway**: Old and new containers both polling during deploy (overlap), or **multiple replicas**.
 **Solution**:
 1. Stop ALL running instances of the bot.
 2. Check your task manager or `ps aux | grep python` to kill hidden processes.
 3. Start ONLY one instance.
+4. **Railway**: Use **exactly 1 replica** for the Copilot service. In Railway dashboard: Service → Settings → Replicas = 1. Remove any duplicate/old deployments. The app uses a short startup delay and `drop_pending_updates` on deploy; if Conflict persists, set `BOT_STARTUP_DELAY=40` (seconds) in Railway variables.
 
 ### Error 401: Unauthorized
 **Cause**: The Telegram Bot Token in your `.env` file is incorrect.

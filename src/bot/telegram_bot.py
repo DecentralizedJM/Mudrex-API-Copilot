@@ -6,7 +6,9 @@ Responds only when mentioned/tagged in groups
 Copyright (c) 2025 DecentralizedJM (https://github.com/DecentralizedJM)
 Licensed under MIT License
 """
+import asyncio
 import logging
+import os
 import re
 from typing import Optional, Dict, Tuple, List, Any
 from collections import defaultdict
@@ -995,6 +997,14 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         
         logger.info(f"[REACTIVE] {user_name} in {chat_id}: {message[:50]}... | reply_to_bot={is_reply_to_bot} | mentioned={bot_mentioned} | quote={is_quote_with_mention}")
         
+        # API down / connectivity: one reply "Let me check.", then typing, then ping result + script + footer
+        if self.rag_pipeline.is_connectivity_question(cleaned_message):
+            await update.message.reply_text("Let me check.")
+            await update.message.chat.send_action(ChatAction.TYPING)
+            await asyncio.sleep(1.5)  # brief "checking" feel
+            second_message = self.rag_pipeline.run_connectivity_check()
+            await self._send_response(update, second_message)
+            return
         
         await update.message.chat.send_action(ChatAction.TYPING)
         
@@ -1288,7 +1298,12 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             await self.app.start()
             # Reset conflict counter on successful start
             self.conflict_count = 0
-            await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+            # On Railway: drop pending updates so we don't fight with the previous instance's getUpdates
+            drop_pending = os.getenv("RAILWAY_ENVIRONMENT", "").strip() != ""
+            await self.app.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=drop_pending,
+            )
             logger.info("MudrexBot started (GROUP-ONLY mode)")
         except Conflict as e:
             logger.error("=" * 60)
@@ -1311,11 +1326,14 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         except (TimedOut, NetworkError) as e:
             logger.warning(f"Network error during startup: {e}")
             logger.info("Retrying in 5 seconds...")
-            import asyncio
             await asyncio.sleep(5)
             # Retry once
             try:
-                await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+                drop_pending = os.getenv("RAILWAY_ENVIRONMENT", "").strip() != ""
+                await self.app.updater.start_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    drop_pending_updates=drop_pending,
+                )
                 logger.info("MudrexBot started after retry (GROUP-ONLY mode)")
             except Exception as retry_error:
                 logger.error(f"Retry failed: {retry_error}")

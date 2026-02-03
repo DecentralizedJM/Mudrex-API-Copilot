@@ -31,7 +31,7 @@ except ImportError:
 try:
     from qdrant_client import QdrantClient
     from qdrant_client.http import models
-    from qdrant_client.http.models import Distance, VectorParams, PointStruct
+    from qdrant_client.http.models import Distance, VectorParams, PointStruct, PointIdsList
     HAS_QDRANT = True
 except ImportError:
     HAS_QDRANT = False
@@ -650,10 +650,32 @@ class VectorStore:
     def clear(self) -> None:
         """Clear all documents from the collection"""
         if self.use_qdrant:
-            # Delete and recreate collection
-            self.client.delete_collection(self.collection_name)
-            self._ensure_collection()
-            logger.info("Cleared Qdrant collection")
+            # Delete all points (don't delete collection — avoids 409 on recreate)
+            try:
+                offset = None
+                all_ids = []
+                while True:
+                    records, offset = self.client.scroll(
+                        self.collection_name,
+                        limit=100,
+                        offset=offset,
+                        with_payload=False,
+                        with_vectors=False,
+                    )
+                    if not records:
+                        break
+                    all_ids.extend(r.id for r in records)
+                    if offset is None:
+                        break
+                if all_ids:
+                    self.client.delete(
+                        self.collection_name,
+                        points_selector=PointIdsList(points=all_ids),
+                    )
+                logger.info("Cleared Qdrant collection (deleted %d points)", len(all_ids))
+            except Exception as e:
+                logger.error(f"Qdrant clear failed: {e}")
+                raise
         else:
             self.documents = []
             self.embeddings = []

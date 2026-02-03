@@ -56,6 +56,21 @@ class RAGPipeline:
         
         logger.info("RAG Pipeline initialized with query planner and semantic cache")
     
+    def _get_off_topic_reply(self, question: str) -> Optional[str]:
+        """Detect off-topic / general-knowledge questions; return short reply or None (no RAG/Gemini)."""
+        q = question.strip().lower()
+        # Remove common bot mention
+        q = re.sub(r'@\w+\s*', '', q).strip()
+        if len(q) < 10:
+            return None
+        # "Who is X", "Who was X", "What is X" when X is not API-related
+        api_keywords = ('api', 'mudrex api', 'endpoint', 'error', 'order', 'auth', 'token', 'header', 'code -', '-1021', '-1111', '404', '400')
+        if any(k in q for k in api_keywords):
+            return None
+        if re.match(r'^(who is|who was|who are|what is|what was)\s+.+', q):
+            return "I'm the Mudrex API copilot — ask me about the API, code, or errors."
+        return None
+    
     def ingest_documents(self, docs_directory: str) -> int:
         """
         Ingest documents from a directory into the vector store
@@ -132,6 +147,16 @@ class RAGPipeline:
 
         # NOTE: is_api_related check is now done in telegram_bot.py (handle_message)
         # Pipeline should always process what gets to it after that gatekeeper check
+        
+        # 1.5. Off-topic / general knowledge — short reply, no RAG/Gemini (fast, low API usage)
+        off_topic_reply = self._get_off_topic_reply(question)
+        if off_topic_reply:
+            logger.info("Off-topic question: using short reply (no RAG)")
+            return {
+                "answer": off_topic_reply,
+                "sources": [{"filename": "Mudrex API Copilot", "similarity": 1.0}],
+                "is_relevant": True,
+            }
         
         # 2. Check response cache first (exact match)
         if self.cache:

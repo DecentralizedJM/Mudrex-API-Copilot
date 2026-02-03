@@ -6,7 +6,9 @@ Licensed under MIT License - See LICENSE file for details.
 """
 import logging
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+
+import requests
 
 from google.genai import types
 
@@ -70,6 +72,62 @@ class RAGPipeline:
         if re.match(r'^(who is|who was|who are|what is|what was)\s+.+', q):
             return "I'm the Mudrex API copilot — ask me about the API, code, or errors."
         return None
+    
+    def _ping_mudrex_api(self, timeout: int = 5) -> Tuple[bool, Optional[int], str]:
+        """Ping Mudrex API; return (is_up, status_code, detail)."""
+        base = "https://trade.mudrex.com/fapi/v1"
+        headers = {}
+        if config.MUDREX_API_SECRET:
+            headers["X-Authentication"] = config.MUDREX_API_SECRET
+        try:
+            # GET a lightweight endpoint; 200 or 401 = API reachable
+            r = requests.get(f"{base}/futures", params={"limit": 1}, headers=headers or None, timeout=timeout)
+            if r.status_code in (200, 401):
+                return True, r.status_code, "reachable"
+            return False, r.status_code, f"HTTP {r.status_code}"
+        except requests.exceptions.ConnectionError as e:
+            return False, None, "connection failed"
+        except requests.exceptions.Timeout:
+            return False, None, "timeout"
+        except Exception as e:
+            return False, None, str(e)
+    
+    def _get_connectivity_check_reply(self, question: str) -> Optional[Dict[str, Any]]:
+        """If question is about API down/connectivity, ping and return reply dict or None."""
+        q = question.lower()
+        if not any(k in q for k in ("api down", "api is down", "unable to connect", "connectivity", "connection", "is mudrex api", "api not working", "can't connect", "cannot connect", "mcp", "check.*connection", "check.*live")):
+            return None
+        logger.info("Connectivity question: pinging Mudrex API")
+        up, status_code, detail = self._ping_mudrex_api()
+        if up:
+            status_line = "I just checked — the Mudrex API is **up** and reachable."
+            script = (
+                "Quick test from your side (replace with your API secret):\n\n"
+                "```python\n"
+                "import requests\n\n"
+                "BASE_URL = \"https://trade.mudrex.com/fapi/v1\"\n"
+                "headers = {\"X-Authentication\": \"YOUR_API_SECRET\"}\n\n"
+                "# Test connectivity — list futures (limit 1)\n"
+                "r = requests.get(f\"{BASE_URL}/futures\", params={\"limit\": 1}, headers=headers, timeout=10)\n"
+                "print(r.status_code, \"OK\" if r.status_code == 200 else r.json())\n"
+                "```"
+            )
+        else:
+            status_line = f"I just checked — the API returned: **{detail}**. It may be temporarily unreachable or your network may be blocking the request."
+            script = (
+                "When it's back, test with:\n\n"
+                "```python\n"
+                "import requests\n\n"
+                "r = requests.get(\"https://trade.mudrex.com/fapi/v1/futures\", params={\"limit\": 1}, headers={\"X-Authentication\": \"YOUR_SECRET\"}, timeout=10)\n"
+                "print(r.status_code, r.json())\n"
+                "```"
+            )
+        answer = f"Let me check.\n\n{status_line}\n\n{script}"
+        return {
+            "answer": answer,
+            "sources": [{"filename": "Mudrex API status (live check)", "similarity": 1.0}],
+            "is_relevant": True,
+        }
     
     def ingest_documents(self, docs_directory: str) -> int:
         """
@@ -157,6 +215,11 @@ class RAGPipeline:
                 "sources": [{"filename": "Mudrex API Copilot", "similarity": 1.0}],
                 "is_relevant": True,
             }
+        
+        # 1.6. API down / connectivity — ping Mudrex API and return live status + script
+        connectivity_reply = self._get_connectivity_check_reply(question)
+        if connectivity_reply:
+            return connectivity_reply
         
         # 2. Check response cache first (exact match)
         if self.cache:

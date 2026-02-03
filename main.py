@@ -163,13 +163,22 @@ async def async_main():
     
     try:
         # Delay before starting bot so previous instance can stop polling (avoids Telegram Conflict on deploy)
-        delay = int(os.getenv("BOT_STARTUP_DELAY", "30" if os.getenv("RAILWAY_ENVIRONMENT") else "0"))
+        delay = int(os.getenv("BOT_STARTUP_DELAY", "60" if os.getenv("RAILWAY_ENVIRONMENT") else "0"))
         if delay > 0:
             logger.info(f"Waiting {delay}s before starting bot (avoids Conflict during deploy)...")
             await asyncio.sleep(delay)
-        # Start the bot
+        # Start the bot (retry once on Conflict in case old instance was slow to stop)
         logger.info("Starting bot...")
-        await bot.start_async()
+        for attempt in range(2):
+            try:
+                await bot.start_async()
+                break
+            except Exception as e:
+                if ("Conflict" in str(e) or "getUpdates" in str(e)) and attempt == 0:
+                    logger.warning("Conflict on first start; waiting 45s then retrying once...")
+                    await asyncio.sleep(45)
+                    continue
+                raise
         
         logger.info("")
         logger.info("=" * 60)

@@ -162,6 +162,11 @@ async def async_main():
         scheduler.start()
     
     try:
+        # Delay before starting bot so previous instance can stop polling (avoids Telegram Conflict on deploy)
+        delay = int(os.getenv("BOT_STARTUP_DELAY", "30" if os.getenv("RAILWAY_ENVIRONMENT") else "0"))
+        if delay > 0:
+            logger.info(f"Waiting {delay}s before starting bot (avoids Conflict during deploy)...")
+            await asyncio.sleep(delay)
         # Start the bot
         logger.info("Starting bot...")
         await bot.start_async()

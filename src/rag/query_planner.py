@@ -69,9 +69,10 @@ class QueryPlanner:
     - Complex questions: Full pipeline
     """
     
-    # Greeting patterns
+    # Greeting patterns (no script — short reply only)
     GREETING_PATTERNS = [
         r'^(hi|hello|hey|yo|sup|gm|gn|what\'?s up)[\s!.,?]*$',
+        r'^(how are you|how\'?re you|how do you do)[\s!.,?]*$',
         r'^(good morning|good afternoon|good evening)[\s!.,?]*$',
         r'^(thanks|thank you|thx)[\s!.,?]*$',
     ]

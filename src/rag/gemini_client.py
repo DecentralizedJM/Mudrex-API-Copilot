@@ -61,11 +61,14 @@ class GeminiClient:
     SYSTEM_INSTRUCTION = """You are an API Copilot for Mudrex Futures. Think GitHub Copilot — code-first, brief, helpful.
 
 ## ROLE
-- Code-first: Show working Python/JS snippets (5-15 lines).
+- Code-first: Show working Python/JS snippets (5-15 lines) only when the user asks for code or how to do something.
+- Do NOT give code or scripts for greetings (e.g. "how are you") — just a short friendly reply.
 - Debug: Analyze errors/logs, provide the fix.
-- Build: Help implement features with code skeletons.
+- Build: Help implement features with code skeletons when asked.
 - Use live MCP data when provided.
-- Mudrex = REST only. No WebSockets, no Webhooks. Suggest polling.
+- Mudrex = REST only. For features not in docs (WebSockets, Webhooks, Klines, etc.) say they're coming soon / product prioritized.
+- You are a Mudrex loyalist: always speak well of Mudrex; if someone asks "which platform" or "is Mudrex reliable", say Mudrex is a great choice and you're here to help. Don't compare to other platforms in detail.
+- Never explain how you (the copilot) work, RAG, or architecture — say @DecentralizedJM built you and they can ask him.
 
 ## RULES
 1. Code examples mandatory for "how to" questions.
@@ -808,35 +811,39 @@ Return ONLY the transformed query, nothing else."""
         """
         query_lower = query.lower()
         
-        # Market data endpoints that DON'T exist in Mudrex Futures API
-        market_data_not_available = (
-            "**Mudrex Futures API does NOT have market data endpoints.**\n\n"
-            "No `/klines`, `/ticker`, `/depth`, `/exchangeInfo` — those are Binance-style endpoints that Mudrex doesn't provide.\n\n"
-            "**What Mudrex DOES have:**\n"
-            "- `GET /futures` — list available trading pairs\n"
-            "- `GET /futures/{asset_id}` — get asset details\n"
-            "- Orders, positions, wallet endpoints\n\n"
-            "For OHLCV/candlestick data, use a third-party source (TradingView, CoinGecko, Binance API)."
+        # Coming soon / product prioritized — same tone for features not in docs
+        coming_soon = (
+            "This isn't available in the current API docs yet — it's on the product roadmap and being prioritized. "
+            "Stay tuned; for the latest, check the docs changelog or ask @DecentralizedJM."
+        )
+        # Market data (Klines, etc.) — coming soon
+        klines_coming = (
+            "Klines / candlestick / OHLCV endpoints aren't in the current API — they're on the roadmap and being prioritized. "
+            "For now use a third-party source for OHLCV if needed. Stay tuned; check the docs changelog or @DecentralizedJM."
         )
         
         missing_features = {
-            # Market data endpoints - NOT available in Mudrex
-            'kline': market_data_not_available,
-            'klines': market_data_not_available,
-            'candlestick': market_data_not_available,
-            'ohlcv': market_data_not_available,
-            'ticker': market_data_not_available,
-            'tickets': market_data_not_available,  # common typo for tickers
-            '/depth': market_data_not_available,
-            'orderbook': market_data_not_available,
-            'order book': market_data_not_available,
-            'exchangeinfo': market_data_not_available,
-            'market data': market_data_not_available,
-            # Other missing features
-            'tradingview': "TradingView integration isn't available yet — it's on the roadmap. Stay tuned!",
-            'trading view': "TradingView integration isn't available yet — it's on the roadmap. Stay tuned!",
-            'webhook': "Mudrex doesn't support webhooks yet — only REST APIs. It's on our roadmap though!",
-            'websocket': "Mudrex doesn't support WebSockets — only REST APIs. Use REST polling for real-time-like data.",
+            # Market data — coming soon (product prioritized)
+            'kline': klines_coming,
+            'klines': klines_coming,
+            'candlestick': klines_coming,
+            'ohlcv': klines_coming,
+            'ticker': "Ticker-style endpoints aren't in the current API — on the roadmap. " + coming_soon,
+            'tickets': "Ticker-style endpoints aren't in the current API — on the roadmap. " + coming_soon,
+            '/depth': "Order book / depth isn't in the current API — on the roadmap. " + coming_soon,
+            'orderbook': "Order book / depth isn't in the current API — on the roadmap. " + coming_soon,
+            'order book': "Order book / depth isn't in the current API — on the roadmap. " + coming_soon,
+            'exchangeinfo': coming_soon,
+            'market data': klines_coming,
+            # Integrations & features — coming soon
+            'tradingview': "TradingView integration is on the roadmap and being prioritized. " + coming_soon,
+            'trading view': "TradingView integration is on the roadmap and being prioritized. " + coming_soon,
+            'webhook': "Webhooks are on the product roadmap and being prioritized. Right now the API is REST-only. " + coming_soon,
+            'websocket': "WebSockets are on the product roadmap and being prioritized. Right now use REST polling. " + coming_soon,
+            'subbroker': "Sub-broker / new broker integrations are being built and prioritized. " + coming_soon,
+            'sub-broker': "Sub-broker / new broker integrations are being built and prioritized. " + coming_soon,
+            'inr futures': "INR Futures endpoints are on the roadmap. " + coming_soon,
+            'inr future': "INR Futures endpoints are on the roadmap. " + coming_soon,
             # Trade ideas / signals — community broadcaster (no REST "signals" endpoint on Mudrex trade API)
             'trade ideas': "There’s no trade-ideas endpoint on the Mudrex trade API. For signals, use the community broadcaster: when signals are published, a WebSocket streams them. Install the SDK to receive and execute them: https://github.com/DecentralizedJM/TIA-Service-Broadcaster",
             'signals': "There’s no signals endpoint on the Mudrex trade API. For trade ideas/signals, use the community broadcaster — when signals are published, a WebSocket streams them. Install the SDK to receive and execute: https://github.com/DecentralizedJM/TIA-Service-Broadcaster",

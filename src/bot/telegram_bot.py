@@ -951,9 +951,9 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             )
             return
         
-        # Lightweight handling for pure greetings when tagged (no RAG, no Gemini call)
+        # Lightweight handling for pure greetings when tagged (no RAG, no script)
         lower_clean = cleaned_message.lower()
-        if re.fullmatch(r"(hi|hello|hey|yo|gm|gn|sup|what'?s up)[\s!,.?]*", lower_clean):
+        if re.fullmatch(r"(hi|hello|hey|yo|gm|gn|sup|what'?s up|how are you|how'?re you)[\s!,.?]*", lower_clean):
             await update.message.reply_text("Hey! What's up? Ask me about the API, code, or errors.")
             return
         

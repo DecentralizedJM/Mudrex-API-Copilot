@@ -72,6 +72,35 @@ class RAGPipeline:
         if re.match(r'^(who is|who was|who are|what is|what was)\s+.+', q):
             return "I'm the Mudrex API copilot — ask me about the API, code, or errors."
         return None
+
+    def _get_bot_architecture_reply(self, question: str) -> Optional[str]:
+        """Don't expose how the copilot works. Redirect to @DecentralizedJM."""
+        q = question.lower()
+        keywords = (
+            "build a bot like you", "build you", "how do you work", "how you work",
+            "rag", "vector store", "api copilot architecture", "copilot testing bot",
+            "deploy a bot like", "build one like you", "share your code", "share me your code",
+            "how can i build you", "how to build you", "details of api copilot",
+            "guide me to build", "steps from starting to deployment", "built one",
+        )
+        if not any(k in q for k in keywords):
+            return None
+        return (
+            "I'm the Mudrex API copilot — built by @DecentralizedJM. "
+            "For questions about how I work or building something similar, reach out to him!"
+        )
+
+    def _get_mudrex_loyalist_reply(self, question: str) -> Optional[str]:
+        """Copilot is Mudrex loyalist: praise Mudrex; for 'why' say I'm here to help."""
+        q = question.lower()
+        if not any(k in q for k in ("which platform", "is mudrex reliable", "mudrex vs", "other platforms", "api trading which", "good platform for api")):
+            return None
+        if "why" in q or "better" in q:
+            return "Mudrex is built for programmatic trading with a simple REST API. I'm here to help you with the API — ask me anything about endpoints, code, or errors."
+        return (
+            "Mudrex is a great choice for API trading — simple REST, no complex signing, and I'm here to help. "
+            "For setup and code, check https://docs.trade.mudrex.com or ask me about specific endpoints."
+        )
     
     def _ping_mudrex_api(self, timeout: int = 5) -> Tuple[bool, Optional[int], str]:
         """Ping Mudrex API; return (is_up, status_code, detail)."""
@@ -230,6 +259,26 @@ class RAGPipeline:
             logger.info("Off-topic question: using short reply (no RAG)")
             return {
                 "answer": off_topic_reply,
+                "sources": [{"filename": "Mudrex API Copilot", "similarity": 1.0}],
+                "is_relevant": True,
+            }
+        
+        # 1.5b. Bot architecture / how copilot works — confidential, redirect to @DecentralizedJM
+        bot_arch_reply = self._get_bot_architecture_reply(question)
+        if bot_arch_reply:
+            logger.info("Bot-architecture question: redirect to creator (no RAG)")
+            return {
+                "answer": bot_arch_reply,
+                "sources": [{"filename": "Mudrex API Copilot", "similarity": 1.0}],
+                "is_relevant": True,
+            }
+        
+        # 1.5c. Mudrex loyalist — which platform / is Mudrex reliable → praise Mudrex, I'm here to help
+        mudrex_loyalist_reply = self._get_mudrex_loyalist_reply(question)
+        if mudrex_loyalist_reply:
+            logger.info("Platform-choice question: Mudrex loyalist reply (no RAG)")
+            return {
+                "answer": mudrex_loyalist_reply,
                 "sources": [{"filename": "Mudrex API Copilot", "similarity": 1.0}],
                 "is_relevant": True,
             }

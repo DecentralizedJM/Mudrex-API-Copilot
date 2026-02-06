@@ -11,20 +11,20 @@ class TestFactStore:
     """Tests for FactStore class"""
     
     @pytest.fixture
-    def fact_store(self, tmp_path):
+    def fact_store(self, tmp_path, mock_config):
         """Create FactStore instance with temp directory"""
-        with patch('src.rag.fact_store.Path') as mock_path:
-            # Make Path("data") return tmp_path / "data"
-            data_dir = tmp_path / "data"
-            data_dir.mkdir()
-            mock_path.return_value = data_dir
-            
-            from src.rag.fact_store import FactStore
-            store = FactStore()
-            store.data_dir = data_dir
-            store.file_path = data_dir / "facts.json"
-            store.facts = {}
-            return store
+        with patch('src.config.settings.config', mock_config):
+            import src.rag.fact_store
+            with patch('src.rag.fact_store.Path') as mock_path:
+                data_dir = tmp_path / "data"
+                data_dir.mkdir()
+                mock_path.return_value = data_dir
+                from src.rag.fact_store import FactStore
+                store = FactStore()
+                store.data_dir = data_dir
+                store.file_path = data_dir / "facts.json"
+                store.facts = {}
+                return store
     
     @pytest.mark.unit
     def test_set_fact(self, fact_store):

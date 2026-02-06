@@ -55,20 +55,25 @@ class TestRAGPipelineIntegration:
     @pytest.fixture
     def rag_pipeline(self, mock_vector_store, mock_gemini_client_for_pipeline, mock_fact_store, mock_config):
         """Create RAG pipeline with mocked components"""
-        with patch('src.rag.pipeline.config', mock_config):
-            with patch('src.rag.pipeline.VectorStore', return_value=mock_vector_store):
-                with patch('src.rag.pipeline.GeminiClient', return_value=mock_gemini_client_for_pipeline):
-                    with patch('src.rag.pipeline.FactStore', return_value=mock_fact_store):
-                        with patch('src.rag.pipeline.RedisCache', return_value=None):
-                            from src.rag.pipeline import RAGPipeline
-                            pipeline = RAGPipeline()
-                            pipeline.vector_store = mock_vector_store
-                            pipeline.gemini_client = mock_gemini_client_for_pipeline
-                            pipeline.fact_store = mock_fact_store
-                            pipeline.cache = None
-                            pipeline.context_manager = None
-                            pipeline.semantic_memory = None
-                            return pipeline
+        mock_config.REDIS_ENABLED = False  # avoid SemanticCache() needing Gemini API key
+        with patch('src.config.settings.config', mock_config):
+            import src.rag.pipeline
+            with patch('src.rag.pipeline.SemanticCache', MagicMock(return_value=None)):
+                with patch('src.rag.pipeline.ContextManager', MagicMock(return_value=None)):
+                    with patch('src.rag.pipeline.SemanticMemory', MagicMock(return_value=None)):
+                        with patch('src.rag.pipeline.VectorStore', return_value=mock_vector_store):
+                            with patch('src.rag.pipeline.GeminiClient', return_value=mock_gemini_client_for_pipeline):
+                                with patch('src.rag.pipeline.FactStore', return_value=mock_fact_store):
+                                    with patch('src.rag.pipeline.RedisCache', return_value=None):
+                                        from src.rag.pipeline import RAGPipeline
+                                        pipeline = RAGPipeline()
+                                        pipeline.vector_store = mock_vector_store
+                                        pipeline.gemini_client = mock_gemini_client_for_pipeline
+                                        pipeline.fact_store = mock_fact_store
+                                        pipeline.cache = None
+                                        pipeline.context_manager = None
+                                        pipeline.semantic_memory = None
+                                        return pipeline
     
     @pytest.mark.integration
     def test_query_basic(self, rag_pipeline, mock_gemini_client_for_pipeline, sample_documents, sample_metadatas):
@@ -171,22 +176,23 @@ class TestRAGPipelineIterativeRetrieval:
     @pytest.fixture
     def pipeline_for_iterative(self, mock_config):
         """Create pipeline for iterative retrieval tests"""
-        with patch('src.rag.pipeline.config', mock_config):
-            mock_config.MAX_ITERATIVE_RETRIEVAL = 2
-            
-            with patch('src.rag.pipeline.VectorStore') as mock_vs:
-                with patch('src.rag.pipeline.GeminiClient') as mock_gc:
-                    with patch('src.rag.pipeline.FactStore'):
-                        with patch('src.rag.pipeline.RedisCache', return_value=None):
-                            from src.rag.pipeline import RAGPipeline
-                            pipeline = RAGPipeline()
-                            
-                            # Setup mocks
-                            pipeline.vector_store = MagicMock()
-                            pipeline.gemini_client = MagicMock()
-                            pipeline.gemini_client.transform_query.return_value = "transformed query"
-                            
-                            return pipeline
+        mock_config.REDIS_ENABLED = False
+        mock_config.MAX_ITERATIVE_RETRIEVAL = 2
+        with patch('src.config.settings.config', mock_config):
+            import src.rag.pipeline
+            with patch('src.rag.pipeline.SemanticCache', MagicMock(return_value=None)):
+                with patch('src.rag.pipeline.ContextManager', MagicMock(return_value=None)):
+                    with patch('src.rag.pipeline.SemanticMemory', MagicMock(return_value=None)):
+                        with patch('src.rag.pipeline.VectorStore') as mock_vs:
+                            with patch('src.rag.pipeline.GeminiClient') as mock_gc:
+                                with patch('src.rag.pipeline.FactStore'):
+                                    with patch('src.rag.pipeline.RedisCache', return_value=None):
+                                        from src.rag.pipeline import RAGPipeline
+                                        pipeline = RAGPipeline()
+                                        pipeline.vector_store = MagicMock()
+                                        pipeline.gemini_client = MagicMock()
+                                        pipeline.gemini_client.transform_query.return_value = "transformed query"
+                                        return pipeline
     
     @pytest.mark.integration
     def test_iterative_retrieval_finds_docs(self, pipeline_for_iterative):

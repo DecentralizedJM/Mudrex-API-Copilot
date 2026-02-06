@@ -63,8 +63,8 @@ class VectorStore:
         # Initialize cache if available
         self.cache = RedisCache() if (config.REDIS_ENABLED and RedisCache) else None
         
-        # Determine storage backend
-        self.use_qdrant = HAS_QDRANT and config.QDRANT_URL and config.QDRANT_API_KEY
+        # Determine storage backend (bool for tests and clarity)
+        self.use_qdrant = bool(HAS_QDRANT and config.QDRANT_URL and config.QDRANT_API_KEY)
         
         if self.use_qdrant:
             self._init_qdrant()

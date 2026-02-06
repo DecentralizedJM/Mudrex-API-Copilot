@@ -13,6 +13,10 @@ import pytest
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Ensure config module is loaded so patch('src.config.settings.config', mock) can resolve.
+# Tests patch config at source so we don't need to load src.rag (and its heavy deps) for patch resolution.
+import src.config.settings  # noqa: F401
+
 
 # ==================== Configuration Fixtures ====================
 

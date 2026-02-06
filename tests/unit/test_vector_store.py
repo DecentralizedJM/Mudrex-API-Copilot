@@ -14,17 +14,17 @@ class TestVectorStorePickleFallback:
     @pytest.fixture
     def vector_store(self, tmp_path, mock_config, mock_gemini_client):
         """Create VectorStore with pickle fallback"""
-        mock_config.QDRANT_URL = ""  # Force pickle fallback
+        mock_config.QDRANT_URL = ""
         mock_config.QDRANT_API_KEY = ""
         mock_config.CHROMA_PERSIST_DIR = str(tmp_path / "chroma")
-        
-        with patch('src.rag.vector_store.config', mock_config):
-            with patch('src.rag.vector_store.genai') as mock_genai:
-                mock_genai.Client.return_value = mock_gemini_client
-                
-                from src.rag.vector_store import VectorStore
-                store = VectorStore()
-                return store
+        with patch('src.config.settings.config', mock_config):
+            import src.rag.vector_store as vs_mod
+            with patch.object(vs_mod, 'config', mock_config):
+                with patch('src.rag.vector_store.genai') as mock_genai:
+                    mock_genai.Client.return_value = mock_gemini_client
+                    from src.rag.vector_store import VectorStore
+                    store = VectorStore()
+                    return store
     
     @pytest.mark.unit
     def test_init_pickle_fallback(self, vector_store):
@@ -108,22 +108,22 @@ class TestVectorStoreQdrant:
     
     @pytest.fixture
     def vector_store_qdrant(self, tmp_path, mock_config, mock_gemini_client, mock_qdrant_client):
-        """Create VectorStore with Qdrant"""
+        """Create VectorStore with Qdrant (mock QdrantClient; qdrant-client may not be installed)"""
         mock_config.QDRANT_URL = "https://test.qdrant.io"
         mock_config.QDRANT_API_KEY = "test_api_key"
         mock_config.QDRANT_COLLECTION_NAME = "test_collection"
         mock_config.QDRANT_VECTOR_SIZE = 768
-        
-        with patch('src.rag.vector_store.config', mock_config):
-            with patch('src.rag.vector_store.genai') as mock_genai:
-                mock_genai.Client.return_value = mock_gemini_client
-                
-                with patch('src.rag.vector_store.QdrantClient') as mock_qdrant_cls:
-                    mock_qdrant_cls.return_value = mock_qdrant_client
-                    
-                    from src.rag.vector_store import VectorStore
-                    store = VectorStore()
-                    return store
+        with patch('src.config.settings.config', mock_config):
+            import src.rag.vector_store as vs_mod
+            with patch.object(vs_mod, 'config', mock_config):
+                with patch.object(vs_mod, 'HAS_QDRANT', True):  # force Qdrant path when lib not installed
+                    with patch('src.rag.vector_store.genai') as mock_genai:
+                        mock_genai.Client.return_value = mock_gemini_client
+                        with patch('src.rag.vector_store.QdrantClient') as mock_qdrant_cls:
+                            mock_qdrant_cls.return_value = mock_qdrant_client
+                            from src.rag.vector_store import VectorStore
+                            store = VectorStore()
+                            return store
     
     @pytest.mark.unit
     def test_init_qdrant(self, vector_store_qdrant):
@@ -170,14 +170,14 @@ class TestEmbeddings:
         mock_config.QDRANT_URL = ""
         mock_config.QDRANT_API_KEY = ""
         mock_config.CHROMA_PERSIST_DIR = str(tmp_path / "chroma")
-        
-        with patch('src.rag.vector_store.config', mock_config):
-            with patch('src.rag.vector_store.genai') as mock_genai:
-                mock_genai.Client.return_value = mock_gemini_client
-                
-                from src.rag.vector_store import VectorStore
-                store = VectorStore()
-                return store
+        with patch('src.config.settings.config', mock_config):
+            import src.rag.vector_store as vs_mod
+            with patch.object(vs_mod, 'config', mock_config):
+                with patch('src.rag.vector_store.genai') as mock_genai:
+                    mock_genai.Client.return_value = mock_gemini_client
+                    from src.rag.vector_store import VectorStore
+                    store = VectorStore()
+                    return store
     
     @pytest.mark.unit
     def test_get_embedding(self, vector_store):

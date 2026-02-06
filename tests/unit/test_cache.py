@@ -20,19 +20,19 @@ class TestRedisCache:
     
     @pytest.fixture
     def cache_with_mock_redis(self, mock_redis, mock_config):
-        """Create cache instance with mocked Redis"""
-        with patch('src.rag.cache.config', mock_config):
+        """Create cache instance with mocked Redis (cache imports redis inside _init_redis_connection)"""
+        with patch('src.config.settings.config', mock_config):
             mock_config.REDIS_ENABLED = True
             mock_config.REDIS_URL = "redis://localhost:6379"
-            
-            with patch('src.rag.cache.redis') as mock_redis_module:
-                mock_redis_module.from_url.return_value = mock_redis
-                
-                from src.rag.cache import RedisCache
-                cache = RedisCache()
-                cache.redis_client = mock_redis
-                cache.connected = True
-                return cache
+            with patch('redis.ConnectionPool') as mock_pool_cls:
+                with patch('redis.Redis') as mock_redis_cls:
+                    mock_pool_cls.from_url.return_value = MagicMock()
+                    mock_redis_cls.return_value = mock_redis
+                    from src.rag.cache import RedisCache
+                    cache = RedisCache()
+                    cache.redis_client = mock_redis
+                    cache.connected = True
+                    return cache
     
     @pytest.mark.unit
     def test_normalize_text(self, cache_with_mock_redis):
@@ -133,7 +133,7 @@ class TestRedisCache:
     def test_get_stats(self, cache_with_mock_redis):
         """Test cache statistics"""
         cache = cache_with_mock_redis
-        cache.stats = {'hits': 10, 'misses': 5}
+        cache.stats = {'hits': 10, 'misses': 5, 'fallback_hits': 0, 'errors': 0}
         
         stats = cache.get_stats()
         assert stats['hits'] == 10
@@ -147,12 +147,10 @@ class TestRedisCacheDisabled:
     @pytest.mark.unit
     def test_cache_disabled(self, mock_config):
         """Test cache gracefully handles disabled state"""
-        with patch('src.rag.cache.config', mock_config):
+        with patch('src.config.settings.config', mock_config):
             mock_config.REDIS_ENABLED = False
-            
             from src.rag.cache import RedisCache
             cache = RedisCache()
-            
             assert cache.connected is False
             assert cache.get_response("test") is None
             assert cache.get_embedding("test") is None

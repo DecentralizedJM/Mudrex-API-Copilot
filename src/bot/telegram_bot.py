@@ -957,6 +957,27 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             await update.message.reply_text("Hey! What's up? Ask me about the API, code, or errors.")
             return
         
+        # Introduction / promotion — someone telling the group about the bot, NOT asking it a question.
+        # e.g. "You can use @bot if you have any questions about setting up the API"
+        # Detection: message is addressed to OTHER users (contains "you can use", "feel free to use",
+        # "tag", "ask", "use this bot", "try", etc.) and is NOT a question directed at the bot.
+        _intro_patterns = (
+            r"you can use\b",
+            r"feel free to (use|tag|ask)\b",
+            r"use this bot\b",
+            r"try (tagging|using|asking)\b",
+            r"tag .* if you (have|need|want)\b",
+            r"ask .* if you (have|need|want)\b",
+            r"here to help .* (questions|errors|issues)\b",
+            r"(is|he'?s|she'?s|it'?s) (here|available) .* (help|assist|answer)\b",
+        )
+        if any(re.search(p, lower_clean) for p in _intro_patterns):
+            logger.info(f"Introduction/promotion message detected from {user_name}; acknowledging briefly.")
+            await update.message.reply_text(
+                "That's me! Tag me or reply to my messages with your API questions — happy to help."
+            )
+            return
+        
         # Access control (if configured)
         if config.ALLOWED_CHAT_IDS and chat_id not in config.ALLOWED_CHAT_IDS:
             logger.warning(f"Unauthorized group: {chat_id}")

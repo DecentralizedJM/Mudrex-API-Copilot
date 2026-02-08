@@ -23,7 +23,7 @@ This PR revamps the Mudrex API Intelligent Assistant into a production-ready, gr
 ### 3. **RAG Knowledge Base**
 - ✅ 10 comprehensive documentation files covering entire Mudrex API
 - ✅ 29 document chunks with semantic search
-- ✅ Gemini `text-embedding-004` for embeddings
+- ✅ Gemini `gemini-embedding-001` for embeddings (fallback if deprecated model configured)
 - ✅ Persistent vector store (`./data/chroma/vectors.pkl`)
 - ✅ Automatic document ingestion pipeline
 
@@ -86,7 +86,7 @@ This PR revamps the Mudrex API Intelligent Assistant into a production-ready, gr
 
 ### Configuration
 - **Model**: `gemini-3-flash-preview`
-- **Embeddings**: `models/text-embedding-004`
+- **Embeddings**: `models/gemini-embedding-001`
 - **Vector Store**: File-based pickle format
 - **Storage**: `./data/chroma/vectors.pkl`
 

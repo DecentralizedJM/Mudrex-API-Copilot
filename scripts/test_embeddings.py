@@ -5,11 +5,15 @@ from pathlib import Path
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from google import genai
+from google.genai.errors import ClientError
 from dotenv import load_dotenv
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import config
+
+# Fallback model (same as vector_store.py)
+EMBEDDING_MODEL_FALLBACK = "models/gemini-embedding-001"
 
 # Load env
 load_dotenv()
@@ -17,7 +21,8 @@ if config.GEMINI_API_KEY:
     os.environ['GEMINI_API_KEY'] = config.GEMINI_API_KEY
 
 def test_embeddings():
-    print(f"Testing embeddings with model: {config.EMBEDDING_MODEL}")
+    model = config.EMBEDDING_MODEL
+    print(f"Testing embeddings with model: {model}")
     
     client = genai.Client(api_key=config.GEMINI_API_KEY)
     
@@ -30,11 +35,23 @@ def test_embeddings():
         print("Generating embeddings...")
         
         def get_embedding(text):
-            result = client.models.embed_content(
-                model=config.EMBEDDING_MODEL,
-                contents=text,
-            )
-            return result.embeddings[0].values
+            nonlocal model
+            try:
+                result = client.models.embed_content(
+                    model=model,
+                    contents=text,
+                )
+                return result.embeddings[0].values
+            except ClientError as e:
+                if ("NOT_FOUND" in str(e) or getattr(e, "status_code", None) == 404) and model != EMBEDDING_MODEL_FALLBACK:
+                    print(f"  Model {model} not found, falling back to {EMBEDDING_MODEL_FALLBACK}")
+                    model = EMBEDDING_MODEL_FALLBACK
+                    result = client.models.embed_content(
+                        model=model,
+                        contents=text,
+                    )
+                    return result.embeddings[0].values
+                raise
             
         emb1 = get_embedding(text1)
         emb2 = get_embedding(text2)

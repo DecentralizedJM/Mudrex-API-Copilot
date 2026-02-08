@@ -1132,6 +1132,8 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
                         error_msg = "⚠️ Multiple bot instances detected. Please stop other instances and try again."
                     elif "Connection" in error_type or "timeout" in error_msg_str.lower():
                         error_msg = "⚠️ Connection issue. Check Redis/Qdrant/Gemini connectivity. Try again in a moment."
+                    elif "ClientError" in error_type and "NOT_FOUND" in error_msg_str:
+                        error_msg = "⚠️ An AI model used by the bot is unavailable. The team has been notified — please try again shortly."
                     else:
                         error_msg = f"That didn't work — try again? Error: {error_type}. If it keeps failing, might be a temporary issue."
                     await update.message.reply_text(error_msg)

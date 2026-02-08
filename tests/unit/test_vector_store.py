@@ -140,6 +140,10 @@ class TestVectorStoreQdrant:
             "document": "Test document about authentication",
             "filename": "auth.md"
         }
+        # query_points is tried first; set up its return value
+        mock_qp_result = MagicMock()
+        mock_qp_result.points = [mock_result]
+        mock_qdrant_client.query_points.return_value = mock_qp_result
         mock_qdrant_client.search.return_value = [mock_result]
         vector_store_qdrant.client = mock_qdrant_client
         
@@ -191,6 +195,15 @@ class TestEmbeddings:
     def test_get_embeddings_batch(self, vector_store):
         """Test getting batch embeddings"""
         texts = ["text 1", "text 2", "text 3"]
+
+        # The mock embed_content needs to return N embeddings when called
+        # with a list of N texts (batch mode uses _embed_content_batch).
+        mock_embedding = MagicMock()
+        mock_embedding.values = [0.1] * 768
+        mock_batch_result = MagicMock()
+        mock_batch_result.embeddings = [mock_embedding] * len(texts)
+        vector_store.gemini_client.models.embed_content.return_value = mock_batch_result
+
         embeddings = vector_store._get_embeddings_batch(texts)
         
         assert len(embeddings) == 3

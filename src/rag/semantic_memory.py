@@ -12,6 +12,7 @@ from datetime import datetime
 import hashlib
 
 from google import genai
+from google.genai.errors import ClientError
 import os
 
 from ..config import config
@@ -53,14 +54,27 @@ class SemanticMemory:
             return None
         
         try:
-            # Use the correct API format (same as vector_store.py)
             result = self.client.models.embed_content(
                 model=self.embedding_model,
-                contents=text,  # text is a string, not a list
+                contents=text,
             )
-            if result and hasattr(result, 'embeddings') and result.embeddings:
+            if result and hasattr(result, "embeddings") and result.embeddings:
                 return result.embeddings[0].values
             return None
+        except ClientError as e:
+            if (getattr(e, "status_code", None) == 404 or "NOT_FOUND" in str(e)) and self.embedding_model != "models/gemini-embedding-001":
+                logger.warning(
+                    "Embedding model %s not found. Using fallback models/gemini-embedding-001.",
+                    self.embedding_model,
+                )
+                result = self.client.models.embed_content(
+                    model="models/gemini-embedding-001",
+                    contents=text,
+                )
+                if result and hasattr(result, "embeddings") and result.embeddings:
+                    return result.embeddings[0].values
+                return None
+            raise
         except Exception as e:
             logger.warning(f"Error getting embedding for memory: {e}")
             # Report embedding errors

@@ -12,6 +12,7 @@ import time
 from typing import Optional, Dict, Any, List, Tuple
 
 from google import genai
+from google.genai.errors import ClientError
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -92,12 +93,24 @@ class SemanticCache:
                 contents=text,
             )
             embedding = result.embeddings[0].values
-            
-            # Cache the embedding
             if self.cache:
                 self.cache.set_embedding(text, embedding)
-            
             return embedding
+        except ClientError as e:
+            if (getattr(e, "status_code", None) == 404 or "NOT_FOUND" in str(e)) and self.embedding_model != "models/gemini-embedding-001":
+                logger.warning(
+                    "Embedding model %s not found. Using fallback models/gemini-embedding-001.",
+                    self.embedding_model,
+                )
+                result = self.client.models.embed_content(
+                    model="models/gemini-embedding-001",
+                    contents=text,
+                )
+                embedding = result.embeddings[0].values
+                if self.cache:
+                    self.cache.set_embedding(text, embedding)
+                return embedding
+            raise
         except Exception as e:
             logger.warning(f"Error getting embedding: {e}")
             return None

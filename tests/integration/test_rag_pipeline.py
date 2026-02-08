@@ -126,7 +126,8 @@ class TestRAGPipelineIntegration:
         mock_gemini_client_for_pipeline.classify_query_domain.return_value = "generic_trading"
         mock_gemini_client_for_pipeline.generate_generic_trading_answer.return_value = "Generic trading advice..."
         
-        result = rag_pipeline.query("What is a stop loss strategy?")
+        # Use a query that won't be caught by _get_off_topic_reply ("what is X" pattern)
+        result = rag_pipeline.query("How should I manage risk in futures trading?")
         
         assert "answer" in result
         mock_gemini_client_for_pipeline.generate_generic_trading_answer.assert_called_once()

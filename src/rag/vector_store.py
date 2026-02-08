@@ -16,8 +16,13 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from google import genai
+from google.genai import types
+from google.genai.errors import ClientError
 
 from ..config import config
+
+# Fallback when EMBEDDING_MODEL is deprecated/unavailable (e.g. text-embedding-004)
+EMBEDDING_MODEL_FALLBACK = "models/gemini-embedding-001"
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +163,30 @@ class VectorStore:
                 'metadatas': self.metadatas,
                 'ids': self.ids
             }, f)
+
+    def _embed_content_single(
+        self,
+        text: str,
+        model: str,
+        output_dimensionality: Optional[int] = None,
+    ):
+        """Call Gemini embed_content with optional output_dimensionality (for Qdrant size)."""
+        kwargs = {"model": model, "contents": text}
+        if output_dimensionality is not None:
+            kwargs["config"] = types.EmbedContentConfig(output_dimensionality=output_dimensionality)
+        return self.gemini_client.models.embed_content(**kwargs)
+
+    def _embed_content_batch(
+        self,
+        texts: List[str],
+        model: str,
+        output_dimensionality: Optional[int] = None,
+    ):
+        """Call Gemini embed_content for multiple texts (batch)."""
+        kwargs = {"model": model, "contents": texts}
+        if output_dimensionality is not None:
+            kwargs["config"] = types.EmbedContentConfig(output_dimensionality=output_dimensionality)
+        return self.gemini_client.models.embed_content(**kwargs)
     
     def _get_embedding(self, text: str, retries: int = 2) -> List[float]:
         """Get embedding for text using Gemini SDK with retry logic"""
@@ -170,22 +199,37 @@ class VectorStore:
         
         for attempt in range(retries + 1):
             try:
-                result = self.gemini_client.models.embed_content(
-                    model=config.EMBEDDING_MODEL,
-                    contents=text,
-                )
+                result = self._embed_content_single(text, model=config.EMBEDDING_MODEL)
                 embedding = result.embeddings[0].values
-                
-                # Cache the embedding
                 if self.cache:
                     self.cache.set_embedding(text, embedding)
-                
                 return embedding
-                
+            except ClientError as e:
+                if (getattr(e, "status_code", None) == 404 or "NOT_FOUND" in str(e)) and config.EMBEDDING_MODEL != EMBEDDING_MODEL_FALLBACK:
+                    logger.warning(
+                        "Embedding model %s not found (404). Using fallback %s. Set EMBEDDING_MODEL=%s in production.",
+                        config.EMBEDDING_MODEL,
+                        EMBEDDING_MODEL_FALLBACK,
+                        EMBEDDING_MODEL_FALLBACK,
+                    )
+                    result = self._embed_content_single(
+                        text,
+                        model=EMBEDDING_MODEL_FALLBACK,
+                        output_dimensionality=config.QDRANT_VECTOR_SIZE,
+                    )
+                    embedding = result.embeddings[0].values
+                    if self.cache:
+                        self.cache.set_embedding(text, embedding)
+                    return embedding
+                if attempt < retries:
+                    logger.warning(f"Embedding retry {attempt + 1}/{retries}: {e}")
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
             except Exception as e:
                 if attempt < retries:
                     logger.warning(f"Embedding retry {attempt + 1}/{retries}: {e}")
-                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                    time.sleep(0.5 * (attempt + 1))
                     continue
                 logger.error(f"Embedding failed after {retries + 1} attempts: {e}")
                 raise
@@ -224,22 +268,37 @@ class VectorStore:
             # Get embeddings for uncached texts
             if texts_to_embed:
                 try:
-                    result = self.gemini_client.models.embed_content(
+                    result = self._embed_content_batch(
+                        texts_to_embed,
                         model=config.EMBEDDING_MODEL,
-                        contents=texts_to_embed,
+                        output_dimensionality=config.QDRANT_VECTOR_SIZE,
                     )
-                    
                     for idx, embedding in zip(cache_indices, result.embeddings):
                         emb_values = embedding.values
                         batch_embeddings.append((idx, emb_values))
-                        
-                        # Cache the embedding
                         if self.cache:
                             self.cache.set_embedding(texts_to_embed[cache_indices.index(idx)], emb_values)
-                            
+                except ClientError as e:
+                    if (getattr(e, "status_code", None) == 404 or "NOT_FOUND" in str(e)) and config.EMBEDDING_MODEL != EMBEDDING_MODEL_FALLBACK:
+                        logger.warning(
+                            "Batch embedding model %s not found. Using fallback %s.",
+                            config.EMBEDDING_MODEL,
+                            EMBEDDING_MODEL_FALLBACK,
+                        )
+                        result = self._embed_content_batch(
+                            texts_to_embed,
+                            model=EMBEDDING_MODEL_FALLBACK,
+                            output_dimensionality=config.QDRANT_VECTOR_SIZE,
+                        )
+                        for idx, embedding in zip(cache_indices, result.embeddings):
+                            emb_values = embedding.values
+                            batch_embeddings.append((idx, emb_values))
+                            if self.cache:
+                                self.cache.set_embedding(texts_to_embed[cache_indices.index(idx)], emb_values)
+                    else:
+                        raise
                 except Exception as e:
                     logger.error(f"Batch embedding failed: {e}")
-                    # Fallback to individual embeddings
                     for idx, text in zip(cache_indices, texts_to_embed):
                         try:
                             emb = self._get_embedding(text)

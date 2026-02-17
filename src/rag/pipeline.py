@@ -76,6 +76,14 @@ class RAGPipeline:
     def _get_bot_architecture_reply(self, question: str) -> Optional[str]:
         """Don't expose how the copilot works. Redirect to @DecentralizedJM."""
         q = question.lower()
+        # Don't treat pasted log/error output as bot-architecture (e.g. SECRET LOGGING, stack traces)
+        log_error_indicators = (
+            "[⚠️]", "secret logging", "potential key leak", "key leak to console",
+            "in client.py", "in init.py", "in tools.py", "in server.py",
+            "x-authentication", "api_secret", "traceback", "exception:",
+        )
+        if any(ind in q for ind in log_error_indicators):
+            return None
         # Don't treat error-debug questions as bot-architecture (user asking about a log/error they pasted)
         error_debug_phrases = (
             "what is this error", "what's this error", "what does this error",

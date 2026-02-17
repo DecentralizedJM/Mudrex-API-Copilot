@@ -50,8 +50,22 @@ def main():
         logger.info("Clearing existing vector store for fresh ingestion...")
         pipeline.vector_store.clear()
     
-    # Ingest
-    num_chunks = pipeline.ingest_documents(str(docs_dir))
+    # Ingest with markdown-aware chunking defaults
+    chunk_size = 1500
+    overlap = 200
+    section_max_size = 2000
+    logger.info(
+        "Using chunking config: chunk_size=%d overlap=%d section_max_size=%d",
+        chunk_size,
+        overlap,
+        section_max_size,
+    )
+    num_chunks = pipeline.ingest_documents(
+        str(docs_dir),
+        chunk_size=chunk_size,
+        overlap=overlap,
+        section_max_size=section_max_size,
+    )
     
     if num_chunks > 0:
         logger.info(f"✓ Successfully ingested {num_chunks} chunks")

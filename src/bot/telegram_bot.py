@@ -893,6 +893,17 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name
         message = update.message.text
+
+        # Early ingress log for diagnosing dropped/rapid messages.
+        logger.info(
+            "[INCOMING] update_id=%s message_id=%s chat_id=%s user_id=%s user=%s text=%s",
+            getattr(update, "update_id", None),
+            getattr(update.message, "message_id", None),
+            chat_id,
+            user_id,
+            user_name,
+            (message[:120] + "...") if len(message) > 120 else message,
+        )
         
         # Check if bot is @mentioned in this message (direct tag)
         bot_mentioned = self._is_bot_mentioned_direct(update)

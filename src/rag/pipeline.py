@@ -193,12 +193,21 @@ class RAGPipeline:
             "is_relevant": True,
         }
     
-    def ingest_documents(self, docs_directory: str) -> int:
+    def ingest_documents(
+        self,
+        docs_directory: str,
+        chunk_size: int = 1500,
+        overlap: int = 200,
+        section_max_size: int = 2000,
+    ) -> int:
         """
         Ingest documents from a directory into the vector store
         
         Args:
             docs_directory: Path to documentation directory
+            chunk_size: Maximum characters per chunk
+            overlap: Overlap between chunks
+            section_max_size: Maximum size of a markdown section before sub-splitting
             
         Returns:
             Number of chunks added
@@ -213,7 +222,12 @@ class RAGPipeline:
             return 0
         
         # Process and chunk documents
-        texts, metadatas, ids = self.document_loader.process_documents(documents)
+        texts, metadatas, ids = self.document_loader.process_documents(
+            documents,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            section_max_size=section_max_size,
+        )
         
         # Add to vector store
         self.vector_store.add_documents(texts, metadatas, ids)
@@ -451,6 +465,10 @@ class RAGPipeline:
                 if not retrieved_docs:
                     retrieved_docs = self.vector_store.search_all_relevant(decomposed, top_k=10)
         
+        # Keep a copy of pre-validation docs so we can still answer from low-sim context
+        # instead of dropping to no-context fallback after strict validation/reranking.
+        pre_validation_docs = list(retrieved_docs) if retrieved_docs else []
+
         # 7. Validate document relevancy (Reliable RAG) - skip if plan says so
         if retrieved_docs and not plan.skip_validation:
             logger.info(f"Validating relevancy of {len(retrieved_docs)} documents")
@@ -493,8 +511,13 @@ class RAGPipeline:
                 for doc in retrieved_docs[:3]  # Top 3 sources
             ]
         else:
-            # No docs found - use context search (no Google Search)
-            logger.info("No relevant docs found; using context search without Google Search")
+            # No docs survived validation/reranking. If we had pre-validation candidates,
+            # use them as low-similarity context instead of falling back to zero-doc mode.
+            low_similarity_docs = pre_validation_docs if pre_validation_docs else []
+            logger.info(
+                "No final docs found; using context search with %d low-sim docs",
+                len(low_similarity_docs),
+            )
             
             # Include semantic memories if available
             enhanced_mcp_context = mcp_context or ""
@@ -506,9 +529,18 @@ class RAGPipeline:
                 enhanced_mcp_context = memory_context + "\n\n" + (mcp_context or "")
             
             answer = self.gemini_client.generate_response_with_context_search(
-                question, [], chat_history, enhanced_mcp_context if enhanced_mcp_context else None
+                question, low_similarity_docs, chat_history, enhanced_mcp_context if enhanced_mcp_context else None
             )
-            sources = [{'filename': 'Context Search (no docs)', 'similarity': 0.0}]
+            if low_similarity_docs:
+                sources = [
+                    {
+                        'filename': doc['metadata'].get('filename', 'Unknown'),
+                        'similarity': doc.get('similarity', 0.0)
+                    }
+                    for doc in low_similarity_docs[:3]
+                ]
+            else:
+                sources = [{'filename': 'Context Search (no docs)', 'similarity': 0.0}]
         
         result = {
             'answer': answer,
@@ -662,7 +694,7 @@ Return ONLY the simplified query, nothing else."""
         enhanced_text = self._enhance_learned_text(text)
         
         if len(enhanced_text) > 1500:
-            chunks = self.document_loader.chunk_document(enhanced_text, chunk_size=1000, overlap=200)
+            chunks = self.document_loader.chunk_document(enhanced_text, chunk_size=1500, overlap=200)
             metadatas = [dict(base, chunk_index=i, total_chunks=len(chunks)) for i in range(len(chunks))]
             self.vector_store.add_documents(chunks, metadatas, None)
             logger.info(f"Learned {len(chunks)} chunks ({len(text)} chars)")

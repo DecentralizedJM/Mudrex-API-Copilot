@@ -922,12 +922,12 @@ Return ONLY the transformed query, nothing else."""
             logger.info("Using template response for API key usage")
             return api_key_response
         
-        # Build prompt with low-similarity docs (if any)
-        prompt = self._build_prompt(query, low_similarity_docs, chat_history, mcp_context)
-        
-        # For no-docs case, use smart fallback with Gemini's knowledge
+        # For no-docs case, return a strict non-hallucinating fallback
         if not low_similarity_docs:
             return self._generate_smart_fallback(query, chat_history, mcp_context)
+
+        # Build prompt with low-similarity docs
+        prompt = self._build_prompt(query, low_similarity_docs, chat_history, mcp_context)
         
         try:
             response = self.client.models.generate_content(
@@ -967,8 +967,8 @@ Return ONLY the transformed query, nothing else."""
         mcp_context: Optional[str] = None,
     ) -> str:
         """
-        Generate helpful response using Gemini's knowledge when no Mudrex docs found.
-        Clearly marks as generic/non-Mudrex knowledge.
+        Return a strict fallback when docs are missing.
+        Must avoid hallucinating endpoints, auth patterns, or scripts.
         """
         # Check for missing features first
         template_response = self._get_missing_feature_response(query)
@@ -979,67 +979,20 @@ Return ONLY the transformed query, nothing else."""
         api_key_response = self._get_api_key_usage_response(query)
         if api_key_response:
             return api_key_response
-        
-        # Build context-aware prompt
-        parts = []
-        if chat_history:
-            history = self._format_history(chat_history[-3:])  # Last 3 messages
-            parts.append(f"Recent conversation:\n{history}")
-        if mcp_context:
-            parts.append(f"Live data context:\n{mcp_context}")
-        
-        context_str = "\n\n".join(parts) if parts else ""
-        
-        fallback_prompt = f"""The user asked: "{query}"
 
-{context_str}
-
-## Situation
-This question isn't covered in the Mudrex API documentation I have access to. However, as an API Copilot, I should still try to help using general API/trading knowledge.
-
-## Your Task
-Provide a helpful response that:
-1. **Acknowledges** this isn't in Mudrex docs
-2. **Helps anyway** using general knowledge/patterns
-3. **Shows code** if it's an implementation question
-4. **Marks as generic** - clearly state this is general knowledge, not Mudrex-specific
-5. **Offers Mudrex help** - suggest checking Mudrex docs or asking @DecentralizedJM for Mudrex-specific details
-
-## Response Style
-- 2-4 sentences + code snippet (if applicable)
-- Be direct and confident - explain based on general API/trading principles
-- Provide working code examples for implementation questions
-- Keep it practical and code-focused
-- Don't say "not in docs" - just answer with your best reasoning
-
-Generate a helpful response:"""
-        
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=fallback_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction="You are an API Copilot. Help developers with code and implementation, even when you don't have specific documentation. Always provide code examples for implementation questions.",
-                    temperature=0.4,
-                    max_output_tokens=config.GEMINI_MAX_TOKENS,
-                )
+        q = query.lower()
+        if "sdk" in q or "python sdk" in q or "client library" in q:
+            return (
+                "Yes — there is a community Python SDK: "
+                "https://github.com/DecentralizedJM/mudrex-api-trading-python-sdk . "
+                "An official SDK is expected later; for endpoint details use https://docs.trade.mudrex.com."
             )
-            
-            answer = response.text if response.text else ""
-            if not answer:
-                return "Couldn't find that. Docs: https://docs.trade.mudrex.com — @DecentralizedJM can help with specifics."
-            
-            answer = self._clean_response(answer)
-            
-            return answer
-        except ClientError as e:
-            logger.error(f"Gemini API error in smart fallback: {e}", exc_info=True)
-            _report_gemini_error(e, {"method": "_generate_smart_fallback", "error_type": "ClientError"})
-            return "I'm not sure about that one — can you share more details? Or @DecentralizedJM might know."
-        except Exception as e:
-            logger.error(f"Error in smart fallback: {e}", exc_info=True)
-            _report_gemini_error(e, {"method": "_generate_smart_fallback"})
-            return "I'm not sure about that one — can you share more details? Or @DecentralizedJM might know."
+
+        return (
+            "Couldn't find that in my indexed Mudrex docs right now. "
+            "Please share the exact endpoint name or error text and I’ll answer precisely. "
+            "Docs: https://docs.trade.mudrex.com — @DecentralizedJM can help with specifics."
+        )
     
     def _build_prompt(
         self,

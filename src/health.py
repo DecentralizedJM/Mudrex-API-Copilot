@@ -7,11 +7,13 @@ Licensed under MIT License
 """
 import asyncio
 import logging
+import os
 import time
+from pathlib import Path
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response, HTTPException
+from fastapi import FastAPI, Response, HTTPException, Header, Depends
 from fastapi.responses import JSONResponse
 import uvicorn
 
@@ -136,7 +138,7 @@ async def root():
         "service": "Mudrex API Copilot",
         "version": __version__,
         "status": "running",
-        "endpoints": ["/health", "/health/live", "/health/ready", "/metrics"],
+        "endpoints": ["/health", "/health/live", "/health/ready", "/metrics", "/stats", "POST /admin/reingest"],
     }
 
 
@@ -277,6 +279,63 @@ async def stats():
             stats["cache"] = {"error": str(e)}
     
     return stats
+
+
+def _verify_reingest_secret(authorization: Optional[str] = Header(None, alias="Authorization")):
+    """Require Bearer token matching REINGEST_SECRET."""
+    secret = os.getenv("REINGEST_SECRET")
+    if not secret:
+        raise HTTPException(status_code=503, detail="Reingest not configured (REINGEST_SECRET not set)")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization[7:].strip()
+    if token != secret:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+
+@app.post("/admin/reingest", dependencies=[Depends(_verify_reingest_secret)])
+async def admin_reingest():
+    """
+    Trigger a full re-ingestion of docs into the vector store (clear + ingest).
+    Requires header: Authorization: Bearer <REINGEST_SECRET>.
+    Use once after deploy to populate/refresh Qdrant from docs/.
+    """
+    if not _rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG pipeline not initialized")
+    docs_dir = Path(__file__).resolve().parent.parent / "docs"
+    if not docs_dir.exists() or not list(docs_dir.rglob("*.md")):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Docs directory missing or empty: {docs_dir}",
+        )
+    chunk_size = 1500
+    overlap = 200
+    section_max_size = 2000
+
+    def _run_ingest():
+        _rag_pipeline.vector_store.clear()
+        return _rag_pipeline.ingest_documents(
+            str(docs_dir),
+            chunk_size=chunk_size,
+            overlap=overlap,
+            section_max_size=section_max_size,
+        )
+
+    try:
+        num_chunks = await asyncio.to_thread(_run_ingest)
+    except Exception as e:
+        logger.exception("Reingest failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    if _rag_pipeline.semantic_cache:
+        _rag_pipeline.semantic_cache.clear()
+        logger.info("Cleared semantic cache after reingest")
+    return JSONResponse(
+        content={
+            "success": True,
+            "chunks": num_chunks,
+            "message": f"Ingested {num_chunks} chunks from {docs_dir}",
+        },
+    )
 
 
 async def start_health_server(host: str = "0.0.0.0", port: int = 8080):

@@ -19,6 +19,7 @@ os.chdir(script_dir)
 from src.config import config
 from src.rag import RAGPipeline
 from src.bot import MudrexBot
+from telegram.error import NetworkError
 from src.mcp import MudrexMCPClient
 from src.tasks.scheduler import setup_scheduler
 from src.lib.error_reporter import report_error_sync, report_error
@@ -177,18 +178,30 @@ async def async_main():
         if delay > 0:
             logger.info(f"Waiting {delay}s before starting bot (avoids Conflict during deploy)...")
             await asyncio.sleep(delay)
-        # Start the bot (retry once on Conflict in case old instance was slow to stop)
+        # Start the bot (retry on Conflict once; retry on NetworkError until shutdown)
         logger.info("Starting bot...")
-        for attempt in range(2):
+        bot_running = False
+        while not bot_running:
             try:
-                await bot.start_async()
-                break
-            except Exception as e:
-                if ("Conflict" in str(e) or "getUpdates" in str(e)) and attempt == 0:
-                    logger.warning("Conflict on first start; waiting 30s then retrying once...")
-                    await asyncio.sleep(30)
-                    continue
-                raise
+                for attempt in range(2):
+                    try:
+                        await bot.start_async()
+                        bot_running = True
+                        break
+                    except Exception as e:
+                        if ("Conflict" in str(e) or "getUpdates" in str(e)) and attempt == 0:
+                            logger.warning("Conflict on first start; waiting 30s then retrying once...")
+                            await asyncio.sleep(30)
+                            continue
+                        raise
+            except NetworkError as e:
+                logger.warning("Network/connectivity error while polling: %s. Reconnecting in 30s...", e)
+                await asyncio.sleep(30)
+                try:
+                    await bot.stop()
+                except Exception:
+                    pass
+                continue
         
         logger.info("")
         logger.info("=" * 60)

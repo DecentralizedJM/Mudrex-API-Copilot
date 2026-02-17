@@ -76,6 +76,15 @@ class RAGPipeline:
     def _get_bot_architecture_reply(self, question: str) -> Optional[str]:
         """Don't expose how the copilot works. Redirect to @DecentralizedJM."""
         q = question.lower()
+        # Don't treat error-debug questions as bot-architecture (user asking about a log/error they pasted)
+        error_debug_phrases = (
+            "what is this error", "what's this error", "what does this error",
+            "what is this mean", "what does this mean", "what's this mean",
+            "explain this error", "why am i seeing", "why am i getting",
+            "why am i getting this", "what does this log", "explain this log",
+        )
+        if any(p in q for p in error_debug_phrases):
+            return None
         keywords = (
             "build a bot like you", "build you", "how do you work", "how you work",
             "rag", "vector store", "api copilot architecture", "copilot testing bot",

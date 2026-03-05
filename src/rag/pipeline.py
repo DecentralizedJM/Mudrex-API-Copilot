@@ -339,7 +339,9 @@ class RAGPipeline:
             return connectivity_reply
         
         # 2. Check response cache first (exact match)
-        if self.cache:
+        # Known-error queries should bypass cache to avoid serving stale
+        # troubleshooting responses after hotfixes/deploys.
+        if self.cache and plan.query_type != QueryType.KNOWN_ERROR:
             try:
                 cached = self.cache.get_response(question, chat_history, mcp_context)
                 if cached:
@@ -349,7 +351,8 @@ class RAGPipeline:
                 logger.warning(f"Cache get error (continuing without cache): {e}")
         
         # 2.1. Check semantic cache (similar query match)
-        if self.semantic_cache:
+        # Same bypass rule for known errors.
+        if self.semantic_cache and plan.query_type != QueryType.KNOWN_ERROR:
             try:
                 semantic_cached = self.semantic_cache.get(question)
                 if semantic_cached:
@@ -372,16 +375,9 @@ class RAGPipeline:
                 'is_relevant': True,
                 'plan': plan.query_type.value,
             }
-            if self.cache:
-                try:
-                    self.cache.set_response(question, chat_history, mcp_context, result)
-                except Exception as e:
-                    logger.warning(f"Cache set error for tool-calling result (non-critical): {e}")
-            if self.semantic_cache:
-                try:
-                    self.semantic_cache.set(question, result)
-                except Exception as e:
-                    logger.warning(f"Semantic cache set error for tool-calling result (non-critical): {e}")
+            # Intentionally skip cache writes for known-error tool responses.
+            # These are deterministic and may evolve frequently; bypassing cache
+            # avoids replaying stale troubleshooting guidance.
             return result
 
         # 2.4. Trade ideas / signals — fixed template (no REST endpoint on Mudrex trade API)

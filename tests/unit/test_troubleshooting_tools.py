@@ -197,6 +197,13 @@ class TestQueryPlannerKnownErrors:
         assert planner._is_known_error("getting 405 method not allowed") == "troubleshoot_http_405"
 
     @pytest.mark.unit
+    def test_500_generic_detected(self, planner):
+        """Generic 'error 500' / 'getting 500 why' should route to 500 tool."""
+        assert planner._is_known_error("I am getting error 500 , why") == "troubleshoot_500_error"
+        assert planner._is_known_error("error 500 why") == "troubleshoot_500_error"
+        assert planner._is_known_error("getting 500") == "troubleshoot_500_error"
+
+    @pytest.mark.unit
     def test_generic_error_not_detected(self, planner):
         """Generic error queries should NOT match known-error patterns."""
         assert planner._is_known_error("something is not working") is None

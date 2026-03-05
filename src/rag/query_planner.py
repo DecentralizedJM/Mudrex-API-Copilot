@@ -123,6 +123,9 @@ class QueryPlanner:
         r'\b500\b.*\b(sl|tp|stop.?loss|take.?profit)\b': "troubleshoot_500_error",
         r'\b(sl|tp|stop.?loss|take.?profit)\b.*\b500\b': "troubleshoot_500_error",
         r'\b500\b.*(internal|server\s*error|inline)': "troubleshoot_500_error",
+        # Generic 500 questions: "error 500", "getting 500", "500 why"
+        r'(error|getting|why|what|see|getting).*\b500\b': "troubleshoot_500_error",
+        r'\b500\b.*(error|why|what|getting)': "troubleshoot_500_error",
         r'\b(pnl|p&l)\b.*(discrepanc|mismatch|differ|wrong|off)': "troubleshoot_pnl_discrepancy",
         r'\b(pnl|p&l)\b.*(not match|doesn.t match|incorrect)': "troubleshoot_pnl_discrepancy",
         r'\b(401|403|-1022)\b': "troubleshoot_auth_error",

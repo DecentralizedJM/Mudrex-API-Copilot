@@ -15,6 +15,7 @@ from google.genai import types
 from google.genai.errors import ClientError
 
 from ..config import config
+from .tools.troubleshooting import TROUBLESHOOTING_TOOLS
 
 # Import error reporter (avoid circular import)
 try:
@@ -138,19 +139,23 @@ If an endpoint isn't in this list or the provided docs, it doesn't exist. Say so
     
     def __init__(self):
         """Initialize Gemini client with NEW SDK"""
-        # Set API key in environment if provided via config
         if config.GEMINI_API_KEY:
             os.environ['GEMINI_API_KEY'] = config.GEMINI_API_KEY
-        
-        # Initialize the new client
+
         self.client = genai.Client()
         self.model_name = config.GEMINI_MODEL
-        self.temperature = 0.1 # Low temperature for strict factual answers
-        
-        # Initialize cache if available
+        # Flash-Lite for lightweight ops (validation, reranking, classification).
+        # Uses a separate per-model quota, reducing 429 cascades on the primary model.
+        self.lite_model_name = config.GEMINI_LITE_MODEL
+        self.temperature = 0.1
+
         self.cache = RedisCache() if (config.REDIS_ENABLED and RedisCache) else None
-        
-        logger.info(f"Initialized Gemini client (new SDK): {self.model_name}")
+
+        # Set by validate_document_relevancy when a 429 is encountered so the
+        # pipeline can skip subsequent Gemini calls (reranking, generation).
+        self.last_rate_limited = False
+
+        logger.info(f"Initialized Gemini client: primary={self.model_name}, lite={self.lite_model_name}")
 
     def classify_query_domain(self, query: str) -> str:
         """
@@ -276,11 +281,117 @@ If an endpoint isn't in this list or the provided docs, it doesn't exist. Say so
         except ClientError as e:
             logger.error(f"Gemini API error generating response: {e}", exc_info=True)
             _report_gemini_error(e, {"method": "generate_response", "model": self.model_name, "error_type": "ClientError"})
+            if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
+                return "I'm temporarily rate-limited by my AI provider. Please try again in about 30 seconds."
             return "Something went wrong on my end — not your code. Try again in a sec?"
         except Exception as e:
             logger.error(f"Error generating response: {e}", exc_info=True)
             _report_gemini_error(e, {"method": "generate_response"})
             return "Something went wrong on my end — not your code. Try again in a sec?"
+
+    def generate_with_tools(
+        self,
+        query: str,
+        tools: list = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+    ) -> str:
+        """
+        Generate a response using Gemini function calling with troubleshooting
+        tools.  When the model invokes a tool the deterministic result is
+        returned directly; otherwise the model's own text answer is used.
+        """
+        if tools is None:
+            tools = TROUBLESHOOTING_TOOLS
+
+        fn_registry = {fn.__name__: fn for fn in tools}
+
+        declarations = []
+        for fn in tools:
+            declarations.append(types.FunctionDeclaration(
+                name=fn.__name__,
+                description=fn.__doc__ or "",
+                parameters={
+                    "type": "OBJECT",
+                    "properties": {
+                        "context": {
+                            "type": "STRING",
+                            "description": "The user's error description or query context",
+                        }
+                    },
+                    "required": ["context"],
+                },
+            ))
+
+        tool_obj = types.Tool(function_declarations=declarations)
+
+        parts: List[str] = []
+        if chat_history:
+            history = self._format_history(chat_history[-4:])
+            parts.append(f"Recent conversation:\n{history}")
+        parts.append(f"User question:\n{query}")
+        prompt = "\n\n".join(parts)
+
+        try:
+            import time
+            max_retries = 2
+            retry_delay = 1.0
+
+            for attempt in range(max_retries + 1):
+                try:
+                    response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            tools=[tool_obj],
+                            system_instruction=self.SYSTEM_INSTRUCTION,
+                            temperature=0.1,
+                            max_output_tokens=config.GEMINI_MAX_TOKENS,
+                        ),
+                    )
+
+                    if (
+                        response.candidates
+                        and response.candidates[0].content
+                        and response.candidates[0].content.parts
+                    ):
+                        for part in response.candidates[0].content.parts:
+                            fc = getattr(part, "function_call", None)
+                            if fc and fc.name in fn_registry:
+                                args = dict(fc.args) if fc.args else {}
+                                args.setdefault("context", query)
+                                result = fn_registry[fc.name](**args)
+                                logger.info("Tool called: %s", fc.name)
+                                return self._clean_response(result)
+
+                    if response.text:
+                        return self._clean_response(response.text)
+
+                    if attempt < max_retries:
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+                    break
+
+                except ClientError as api_error:
+                    error_str = str(api_error)
+                    _report_gemini_error(api_error, {
+                        "method": "generate_with_tools",
+                        "attempt": attempt + 1,
+                        "error_type": "ClientError",
+                    })
+                    if "503" in error_str or "UNAVAILABLE" in error_str:
+                        if attempt < max_retries:
+                            time.sleep(retry_delay * (2 ** attempt))
+                            continue
+                    break
+
+        except Exception as e:
+            logger.error("Error in generate_with_tools: %s", e, exc_info=True)
+            _report_gemini_error(e, {"method": "generate_with_tools"})
+
+        return (
+            "Couldn't process that right now. Try sharing the exact error "
+            "code or response body and I'll help debug it."
+        )
 
     def generate_generic_trading_answer(
         self,
@@ -405,19 +516,23 @@ limiter.wait_if_needed()
         )
         
         # If only 1-2 docs, validate them individually
-        # If more, batch validate for efficiency
         validated_docs = []
-        
+        rate_limited = False
+        self.last_rate_limited = False
+
         for doc in documents:
+            if rate_limited:
+                validated_docs.append(doc)
+                continue
+
             source = doc.get('metadata', {}).get('filename', '')
-            
-            # Auto-include error-code docs when query looks like an error
+
             if query_has_error_pattern and 'error' in source.lower():
-                doc['relevancy_score'] = 0.9  # High relevancy for error docs
+                doc['relevancy_score'] = 0.9
                 validated_docs.append(doc)
                 logger.debug(f"Document auto-included (error pattern match): {source}")
                 continue
-            # Check cache first
+
             if self.cache:
                 cached = self.cache.get_validation(query, doc)
                 if cached:
@@ -427,10 +542,9 @@ limiter.wait_if_needed()
                         logger.debug(f"Document validated (cached): score={cached.get('score', 0):.2f}")
                     else:
                         logger.debug(f"Document filtered out (cached): score={cached.get('score', 0):.2f}")
-                    continue  # Skip Gemini call
-            
-            # Call Gemini for validation
-            doc_text = doc.get('document', '')[:1000]  # Limit for validation prompt
+                    continue
+
+            doc_text = doc.get('document', '')[:1000]
             validation_prompt = f"""Does this document answer the user's question?
 
 User Question: {query}
@@ -442,73 +556,59 @@ Answer with ONLY a JSON object:
 {{"relevant": true/false, "score": 0.0-1.0, "reason": "brief explanation"}}
 
 Score 0.0-1.0 based on how well the document answers the question. Only return true if score >= 0.6."""
-            
+
             try:
                 import time
                 max_retries = 2
                 retry_delay = 1.0
-                
+
                 for attempt in range(max_retries + 1):
                     try:
                         response = self.client.models.generate_content(
-                            model=self.model_name,
+                            model=self.lite_model_name,
                             contents=validation_prompt,
                             config=types.GenerateContentConfig(
                                 response_mime_type="application/json",
                                 temperature=0.1
                             )
                         )
-                        
-                        # Check if response.text is None or empty
+
                         if not response.text:
                             logger.warning(f"Empty response from Gemini (attempt {attempt + 1})")
                             if attempt < max_retries:
                                 time.sleep(retry_delay * (attempt + 1))
                                 continue
-                            # On final attempt, include doc to be safe
                             validated_docs.append(doc)
                             break
-                        
+
                         import json
                         result = json.loads(response.text)
-                        
-                        # Cache the result
+
                         if self.cache:
                             self.cache.set_validation(query, doc, result)
-                        
+
                         if result.get('relevant', False) and result.get('score', 0) >= config.RELEVANCY_THRESHOLD:
                             doc['relevancy_score'] = result.get('score', 0)
                             validated_docs.append(doc)
                             logger.debug(f"Document validated: score={result.get('score', 0):.2f}")
                         else:
                             logger.debug(f"Document filtered out: score={result.get('score', 0):.2f}")
-                        break  # Success, exit retry loop
-                        
-                    except ClientError as api_error:
-                        error_str = str(api_error)
-                        # Report API errors
-                        _report_gemini_error(api_error, {"method": "validate_document_relevancy", "attempt": attempt + 1, "error_type": "ClientError"})
-                        # Check if it's a 503 or rate limit error
-                        if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
-                            if attempt < max_retries:
-                                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                                logger.warning(f"Gemini overloaded (503), retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
-                                time.sleep(wait_time)
-                                continue
-                            else:
-                                logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, including doc to be safe")
-                                validated_docs.append(doc)
-                                break
-                        else:
-                            # Other errors - re-raise to outer except
-                            raise
-                    except Exception as api_error:
+                        break
+
+                    except (ClientError, Exception) as api_error:
                         error_str = str(api_error)
                         _report_gemini_error(api_error, {"method": "validate_document_relevancy", "attempt": attempt + 1})
-                        # Check if it's a 503 or rate limit error
+
+                        # 429 → bail out of entire validation loop immediately
+                        if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
+                            logger.warning("Gemini 429 during validation — skipping remaining docs to preserve quota")
+                            rate_limited = True
+                            validated_docs.append(doc)
+                            break
+
                         if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
                             if attempt < max_retries:
-                                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                                wait_time = retry_delay * (2 ** attempt)
                                 logger.warning(f"Gemini overloaded (503), retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
                                 time.sleep(wait_time)
                                 continue
@@ -516,17 +616,18 @@ Score 0.0-1.0 based on how well the document answers the question. Only return t
                                 logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, including doc to be safe")
                                 validated_docs.append(doc)
                                 break
-                        else:
-                            # Other errors - re-raise to outer except
-                            raise
-                            
+                        raise
+
             except Exception as e:
                 logger.warning(f"Error validating document relevancy: {e}")
                 _report_gemini_error(e, {"method": "validate_document_relevancy", "error_type": "validation_failure"})
-                # On error, include the doc to be safe (better than filtering out good docs)
                 validated_docs.append(doc)
-        
-        logger.info(f"Validated {len(validated_docs)}/{len(documents)} documents as relevant")
+
+        if rate_limited:
+            self.last_rate_limited = True
+            logger.info("Validation aborted (rate limited) — returning all %d docs as-is", len(validated_docs))
+        else:
+            logger.info(f"Validated {len(validated_docs)}/{len(documents)} documents as relevant")
         return validated_docs
     
     def rerank_documents(
@@ -593,7 +694,7 @@ Return ONLY a JSON array of document indices (0-based) sorted by relevance (most
             for attempt in range(max_retries + 1):
                 try:
                     response = self.client.models.generate_content(
-                        model=self.model_name,
+                        model=self.lite_model_name,
                         contents=rerank_prompt,
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
@@ -630,54 +731,25 @@ Return ONLY a JSON array of document indices (0-based) sorted by relevance (most
                     logger.info(f"Reranked {len(ranked_docs)} documents")
                     return ranked_docs
                     
-                except ClientError as api_error:
-                    error_str = str(api_error)
-                    _report_gemini_error(api_error, {"method": "rerank_documents", "attempt": attempt + 1, "error_type": "ClientError"})
-                    # Check if it's a 503 or rate limit error
-                    if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
-                        if attempt < max_retries:
-                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                            logger.warning(f"Gemini overloaded (503) for reranking, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
-                            time.sleep(wait_time)
-                            continue
-                        else:
-                            logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using similarity order")
-                            break
-                    else:
-                        # Other errors - break and fall back
-                        break
-                except Exception as api_error:
-                    error_str = str(api_error)
-                    _report_gemini_error(api_error, {"method": "rerank_documents", "attempt": attempt + 1, "error_type": "ClientError"})
-                    # Check if it's a 503 or rate limit error
-                    if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
-                        if attempt < max_retries:
-                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                            logger.warning(f"Gemini overloaded (503) for reranking, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
-                            time.sleep(wait_time)
-                            continue
-                        else:
-                            logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using similarity order")
-                            break
-                    else:
-                        # Other errors - break and fall back
-                        break
-                except Exception as api_error:
+                except (ClientError, Exception) as api_error:
                     error_str = str(api_error)
                     _report_gemini_error(api_error, {"method": "rerank_documents", "attempt": attempt + 1})
-                    # Check if it's a 503 or rate limit error
+
+                    # 429 → skip reranking entirely, fall back to similarity order
+                    if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
+                        logger.warning("Gemini 429 during reranking — falling back to similarity order")
+                        break
+
                     if '503' in error_str or 'UNAVAILABLE' in error_str or 'overloaded' in error_str.lower():
                         if attempt < max_retries:
-                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                            wait_time = retry_delay * (2 ** attempt)
                             logger.warning(f"Gemini overloaded (503) for reranking, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries + 1})")
                             time.sleep(wait_time)
                             continue
                         else:
                             logger.warning(f"Gemini still overloaded after {max_retries + 1} attempts, using similarity order")
                             break
-                    else:
-                        # Other errors - break and fall back
-                        break
+                    break
                         
         except Exception as e:
             logger.warning(f"Error reranking documents: {e}, using similarity order")
@@ -732,7 +804,7 @@ Return ONLY the transformed query, nothing else."""
             for attempt in range(max_retries + 1):
                 try:
                     response = self.client.models.generate_content(
-                        model=self.model_name,
+                        model=self.lite_model_name,
                         contents=transform_prompt,
                         config=types.GenerateContentConfig(
                             temperature=0.2

@@ -33,7 +33,8 @@ class Config:
     ADMIN_USER_IDS: Optional[List[int]] = None  # Admin users for escalation
     
     # Gemini AI Settings (NEW SDK)
-    GEMINI_MODEL: str = "gemini-3-flash-preview"  # Latest model
+    GEMINI_MODEL: str = "gemini-3-flash-preview"  # Primary model for generation
+    GEMINI_LITE_MODEL: str = "gemini-3.1-flash-lite-preview"  # Lightweight model for validation/reranking/classification
     GEMINI_TEMPERATURE: float = 0.4  # Slightly creative but focused
     GEMINI_MAX_TOKENS: int = 800  # Reduced for concise responses
     
@@ -134,6 +135,7 @@ class Config:
             
             # Gemini
             GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
+            GEMINI_LITE_MODEL=os.getenv("GEMINI_LITE_MODEL", "gemini-3.1-flash-lite-preview"),
             GEMINI_TEMPERATURE=float(os.getenv("GEMINI_TEMPERATURE", "0.4")),
             GEMINI_MAX_TOKENS=int(os.getenv("GEMINI_MAX_TOKENS", "2048")),
             

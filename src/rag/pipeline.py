@@ -19,6 +19,7 @@ from .fact_store import FactStore
 from .cache import RedisCache
 from .query_planner import QueryPlanner, QueryPlan, QueryType
 from .semantic_cache import SemanticCache
+from .tools.troubleshooting import TROUBLESHOOTING_TOOLS
 from ..config import config
 
 logger = logging.getLogger(__name__)
@@ -76,31 +77,49 @@ class RAGPipeline:
     def _get_bot_architecture_reply(self, question: str) -> Optional[str]:
         """Don't expose how the copilot works. Redirect to @DecentralizedJM."""
         q = question.lower()
-        # Don't treat pasted log/error output as bot-architecture (e.g. SECRET LOGGING, stack traces)
-        log_error_indicators = (
-            "[⚠️]", "secret logging", "potential key leak", "key leak to console",
+
+        # Pasted error output / code / JSON — never treat as bot-architecture
+        error_bail_indicators = (
+            "⚠️", "failed", "error detail", "status code", "traceback",
+            "exception:", "x-authentication", "api_secret",
+            "secret logging", "potential key leak", "key leak to console",
             "in client.py", "in init.py", "in tools.py", "in server.py",
-            "x-authentication", "api_secret", "traceback", "exception:",
+            '"code"', '"msg"', '"success"', '"data"', '"order_id"',
+            "executing:", "process finished",
         )
-        if any(ind in q for ind in log_error_indicators):
+        if any(ind in q for ind in error_bail_indicators):
             return None
-        # Don't treat error-debug questions as bot-architecture (user asking about a log/error they pasted)
+
+        # HTTP status codes in the message — definitely an error paste, not about the bot
+        if re.search(r'\b(200|201|202|400|401|403|404|405|429|500)\b', q):
+            return None
+
+        # User asking about an error they pasted
         error_debug_phrases = (
             "what is this error", "what's this error", "what does this error",
             "what is this mean", "what does this mean", "what's this mean",
             "explain this error", "why am i seeing", "why am i getting",
             "why am i getting this", "what does this log", "explain this log",
+            "i am getting", "i'm getting", "getting this error", "help me",
+            "can u check", "can you check", "check this",
         )
         if any(p in q for p in error_debug_phrases):
             return None
-        keywords = (
+
+        # Use word-boundary regex to avoid false positives ("rag" inside "leverage")
+        _ARCH_PATTERNS = (
+            r'\brag\b', r'\bvector store\b',
+        )
+        _ARCH_KEYWORDS = (
             "build a bot like you", "build you", "how do you work", "how you work",
-            "rag", "vector store", "api copilot architecture", "copilot testing bot",
+            "api copilot architecture", "copilot testing bot",
             "deploy a bot like", "build one like you", "share your code", "share me your code",
             "how can i build you", "how to build you", "details of api copilot",
-            "guide me to build", "steps from starting to deployment", "built one",
+            "guide me to build", "steps from starting to deployment",
         )
-        if not any(k in q for k in keywords):
+
+        matched = any(k in q for k in _ARCH_KEYWORDS) or any(re.search(p, q) for p in _ARCH_PATTERNS)
+        if not matched:
             return None
         return (
             "I'm the Mudrex API copilot — built by @DecentralizedJM. "
@@ -339,6 +358,32 @@ class RAGPipeline:
             except Exception as e:
                 logger.warning(f"Semantic cache error (continuing): {e}")
 
+        # 2.2. Tool-calling fast path for known errors (deterministic, no RAG)
+        if plan.query_type == QueryType.KNOWN_ERROR and plan.use_tool_calling:
+            logger.info("Known error detected; using tool-calling fast path (hint=%s)", plan.tool_hint)
+            answer = self.gemini_client.generate_with_tools(
+                query=question,
+                tools=TROUBLESHOOTING_TOOLS,
+                chat_history=chat_history,
+            )
+            result = {
+                'answer': answer,
+                'sources': [{'filename': 'Troubleshooting Tools (deterministic)', 'similarity': 1.0}],
+                'is_relevant': True,
+                'plan': plan.query_type.value,
+            }
+            if self.cache:
+                try:
+                    self.cache.set_response(question, chat_history, mcp_context, result)
+                except Exception as e:
+                    logger.warning(f"Cache set error for tool-calling result (non-critical): {e}")
+            if self.semantic_cache:
+                try:
+                    self.semantic_cache.set(question, result)
+                except Exception as e:
+                    logger.warning(f"Semantic cache set error for tool-calling result (non-critical): {e}")
+            return result
+
         # 2.4. Trade ideas / signals — fixed template (no REST endpoint on Mudrex trade API)
         trade_ideas_response = self.gemini_client._get_missing_feature_response(question)
         if trade_ideas_response and any(kw in question.lower() for kw in ("trade ideas", "signals", "signal")):
@@ -477,7 +522,10 @@ class RAGPipeline:
             logger.debug("Skipping validation per query plan")
         
         # 8. Rerank documents for better quality - skip if plan says so
-        if retrieved_docs and not plan.skip_rerank:
+        #    Also skip if validation already hit a 429 (no point burning more quota)
+        if self.gemini_client.last_rate_limited:
+            logger.info("Skipping rerank — Gemini rate-limited during validation")
+        elif retrieved_docs and not plan.skip_rerank:
             logger.info(f"Reranking {len(retrieved_docs)} documents")
             retrieved_docs = self.gemini_client.rerank_documents(question, retrieved_docs)
         elif plan.skip_rerank:
@@ -609,8 +657,8 @@ class RAGPipeline:
         q = question.strip()
         if not q or len(q) > 2000:
             return False
-        # HTTP status in message (e.g. "400", "401", "429", "500")
-        if re.search(r"\b(400|401|403|404|429|500)\b", q):
+        # HTTP status in message (e.g. "202", "400", "401", "429", "500")
+        if re.search(r"\b(202|400|401|403|404|405|429|500)\b", q):
             return True
         # JSON-style error: "code" and "msg"
         if '"code"' in q and '"msg"' in q:
@@ -654,7 +702,7 @@ Return ONLY the simplified query, nothing else."""
         
         try:
             response = self.gemini_client.client.models.generate_content(
-                model=self.gemini_client.model_name,
+                model=self.gemini_client.lite_model_name,
                 contents=decompose_prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
@@ -676,7 +724,8 @@ Return ONLY the simplified query, nothing else."""
         """Get pipeline statistics"""
         return {
             'total_documents': self.vector_store.get_count(),
-            'model': self.gemini_client.model_name
+            'model': self.gemini_client.model_name,
+            'lite_model': self.gemini_client.lite_model_name,
         }
 
     def learn_text(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> None:

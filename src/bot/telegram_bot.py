@@ -43,7 +43,7 @@ I'm your **Mudrex API copilot**. You can:
 • Use /help to see what I can do
 • Use /endpoints for API endpoints, /listfutures for futures count
 
-Just mention me or reply to my messages to get started."""
+Just tag me with @ to get started."""
 
 # Warning to append when user has shared their API secret in the chat
 API_KEY_EXPOSED_WARNING = (
@@ -588,6 +588,7 @@ For personal account data (positions, orders), use Claude Desktop with your own 
         stats_text = f"""*Bot Stats*
 
 Model: {stats['model']}
+Lite: {stats.get('lite_model', 'n/a')}
 Docs indexed: {stats['total_documents']}
 MCP: {mcp_status}
 Auth: {auth_status}"""
@@ -874,12 +875,8 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         """
         Handle incoming messages in groups - REACTIVE ONLY
         
-        Responds ONLY when explicitly engaged:
-        1. Bot is @mentioned directly
-        2. Reply to bot's message (conversation continuation)
-        3. Quote + mention (someone quotes another user's message AND tags bot)
-        
-        Does NOT auto-detect keywords or respond proactively.
+        Responds ONLY when the bot is @mentioned directly.
+        Replies and quotes without an @mention are ignored.
         """
         if not update.message or not update.message.text:
             return
@@ -908,31 +905,19 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
         # Check if bot is @mentioned in this message (direct tag)
         bot_mentioned = self._is_bot_mentioned_direct(update)
         
-        # Check if this is a reply to the bot's own message (continuation)
-        is_reply_to_bot = (
-            update.message.reply_to_message and 
-            update.message.reply_to_message.from_user and 
-            update.message.reply_to_message.from_user.is_bot and
-            self.app.bot and
-            update.message.reply_to_message.from_user.id == self.app.bot.id
-        )
+        # STRICT: Only respond when the bot is explicitly @mentioned.
+        # Replies and quotes without an @mention are ignored.
+        if not bot_mentioned:
+            logger.debug(f"Not @mentioned, ignoring message from {user_name}")
+            return
         
         # Quote + mention: User replies to ANOTHER user's message AND tags the bot
-        # This is how admins/peers can ask the bot to help with someone else's question
         is_quote_with_mention = (
             update.message.reply_to_message and
             update.message.reply_to_message.from_user and
             not update.message.reply_to_message.from_user.is_bot and
             bot_mentioned
         )
-        
-        # REACTIVE ONLY: Respond ONLY when explicitly engaged
-        # 1. Bot is @mentioned
-        # 2. Reply to bot's message (continuation)
-        # 3. Quote + mention (someone quotes another user and tags bot)
-        if not bot_mentioned and not is_reply_to_bot:
-            logger.debug(f"Not engaged, ignoring message from {user_name}")
-            return
         
         # Strip bot @mention from the message for processing
         cleaned_message = message
@@ -1027,7 +1012,7 @@ Docs: docs.trade.mudrex.com/docs/mcp"""
             await self._send_response(update, answer)
             return
         
-        logger.info(f"[REACTIVE] {user_name} in {chat_id}: {message[:50]}... | reply_to_bot={is_reply_to_bot} | mentioned={bot_mentioned} | quote={is_quote_with_mention}")
+        logger.info(f"[REACTIVE] {user_name} in {chat_id}: {message[:50]}... | mentioned={bot_mentioned} | quote={is_quote_with_mention}")
         
         # API down / connectivity: one reply "Let me check.", then typing, then ping result + script + footer
         if self.rag_pipeline.is_connectivity_question(cleaned_message):

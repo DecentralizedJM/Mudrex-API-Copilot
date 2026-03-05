@@ -19,6 +19,7 @@ class QueryType(Enum):
     GREETING = "greeting"
     SIMPLE_FACT = "simple_fact"
     CODE_REQUEST = "code_request"
+    KNOWN_ERROR = "known_error"
     ERROR_DEBUG = "error_debug"
     COMPLEX_QUESTION = "complex_question"
     GENERIC_TRADING = "generic_trading"
@@ -44,6 +45,8 @@ class QueryPlan:
     use_fact_store: bool = False  # Check fact store first
     use_canned_response: bool = False  # Return canned response
     canned_response_key: Optional[str] = None  # Key for canned response
+    use_tool_calling: bool = False  # Use Gemini function-calling tools
+    tool_hint: Optional[str] = None  # Suggested tool function name
     
     # Metadata
     confidence: float = 1.0  # How confident the planner is
@@ -115,6 +118,28 @@ class QueryPlanner:
         "fapi/v1", "mudrex api", "mudrex futures",
     ]
     
+    # Known-error patterns → tool function hints (checked before generic ERROR_DEBUG)
+    KNOWN_ERROR_PATTERNS = {
+        r'\b500\b.*\b(sl|tp|stop.?loss|take.?profit)\b': "troubleshoot_500_error",
+        r'\b(sl|tp|stop.?loss|take.?profit)\b.*\b500\b': "troubleshoot_500_error",
+        r'\b500\b.*(internal|server\s*error|inline)': "troubleshoot_500_error",
+        r'\b(pnl|p&l)\b.*(discrepanc|mismatch|differ|wrong|off)': "troubleshoot_pnl_discrepancy",
+        r'\b(pnl|p&l)\b.*(not match|doesn.t match|incorrect)': "troubleshoot_pnl_discrepancy",
+        r'\b(401|403|-1022)\b': "troubleshoot_auth_error",
+        r'\b(auth|authenticat).*(fail|error|invalid|wrong|issue)': "troubleshoot_auth_error",
+        r'\b429\b': "troubleshoot_rate_limit",
+        r'\brate.?limit': "troubleshoot_rate_limit",
+        r'-1111\b': "troubleshoot_order_error",
+        r'-1121\b': "troubleshoot_order_error",
+        r'\b(precision|step.?size)\b.*(error|issue|wrong|fail)': "troubleshoot_order_error",
+        # 202 Accepted — extremely common confusion (user thinks it's an error)
+        r'(failed|error|❌).*\b202\b': "troubleshoot_http_202",
+        r'\b202\b.*(failed|error|what|why|issue|wrong)': "troubleshoot_http_202",
+        r'"success"\s*:\s*true.*\b202\b': "troubleshoot_http_202",
+        # 405 Method Not Allowed
+        r'\b405\b': "troubleshoot_http_405",
+    }
+    
     # Canned responses
     CANNED_RESPONSES = {
         "greeting": "Hey! What's up? Ask me about the API, code, or errors.",
@@ -130,6 +155,10 @@ class QueryPlanner:
         """Pre-compile regex patterns for performance"""
         self.greeting_regexes = [
             re.compile(p, re.IGNORECASE) for p in self.GREETING_PATTERNS
+        ]
+        self.known_error_regexes = [
+            (re.compile(p, re.IGNORECASE | re.DOTALL), hint)
+            for p, hint in self.KNOWN_ERROR_PATTERNS.items()
         ]
     
     def plan(self, query: str, context: Optional[Dict[str, Any]] = None) -> QueryPlan:
@@ -180,10 +209,24 @@ class QueryPlanner:
                 )
         
         # 3. Determine query type
+        # 3a. Check for specific known errors (deterministic tool-calling path)
+        known_error_hint = self._is_known_error(query_lower)
+        if known_error_hint:
+            return QueryPlan(
+                query_type=QueryType.KNOWN_ERROR,
+                skip_retrieval=True,
+                skip_validation=True,
+                skip_rerank=True,
+                use_tool_calling=True,
+                tool_hint=known_error_hint,
+                confidence=0.95,
+                reason=f"Known error pattern matched -> {known_error_hint}"
+            )
+        
+        # 3b. Generic error/debugging (full RAG pipeline)
         if self._is_error_debug(query_lower):
             return QueryPlan(
                 query_type=QueryType.ERROR_DEBUG,
-                # Full pipeline for error debugging - context matters
                 reason="Error/debugging query - full pipeline"
             )
         
@@ -218,6 +261,16 @@ class QueryPlanner:
             confidence=0.7,
             reason="Complex question - full pipeline"
         )
+    
+    def _is_known_error(self, query_lower: str) -> Optional[str]:
+        """Check if query matches a specific known-error pattern.
+        
+        Returns the tool function hint (e.g. "troubleshoot_500_error") or None.
+        """
+        for regex, hint in self.known_error_regexes:
+            if regex.search(query_lower):
+                return hint
+        return None
     
     def _is_greeting(self, query: str) -> bool:
         """Check if query is a simple greeting"""

@@ -24,6 +24,9 @@ from ..config import config
 # Fallback when EMBEDDING_MODEL is deprecated/unavailable (e.g. text-embedding-004)
 EMBEDDING_MODEL_FALLBACK = "models/gemini-embedding-001"
 
+# Track whether the embedding fallback warning has been logged already
+_embedding_fallback_warned = False
+
 logger = logging.getLogger(__name__)
 
 # Import cache (avoid circular import)
@@ -206,12 +209,16 @@ class VectorStore:
                 return embedding
             except ClientError as e:
                 if (getattr(e, "status_code", None) == 404 or "NOT_FOUND" in str(e)) and config.EMBEDDING_MODEL != EMBEDDING_MODEL_FALLBACK:
-                    logger.warning(
-                        "Embedding model %s not found (404). Using fallback %s. Set EMBEDDING_MODEL=%s in production.",
-                        config.EMBEDDING_MODEL,
-                        EMBEDDING_MODEL_FALLBACK,
-                        EMBEDDING_MODEL_FALLBACK,
-                    )
+                    global _embedding_fallback_warned
+                    if not _embedding_fallback_warned:
+                        logger.warning(
+                            "Embedding model %s not found. Using fallback %s for all subsequent calls. "
+                            "Set EMBEDDING_MODEL=%s in production to silence this.",
+                            config.EMBEDDING_MODEL,
+                            EMBEDDING_MODEL_FALLBACK,
+                            EMBEDDING_MODEL_FALLBACK,
+                        )
+                        _embedding_fallback_warned = True
                     result = self._embed_content_single(
                         text,
                         model=EMBEDDING_MODEL_FALLBACK,
@@ -280,11 +287,14 @@ class VectorStore:
                             self.cache.set_embedding(texts_to_embed[cache_indices.index(idx)], emb_values)
                 except ClientError as e:
                     if (getattr(e, "status_code", None) == 404 or "NOT_FOUND" in str(e)) and config.EMBEDDING_MODEL != EMBEDDING_MODEL_FALLBACK:
-                        logger.warning(
-                            "Batch embedding model %s not found. Using fallback %s.",
-                            config.EMBEDDING_MODEL,
-                            EMBEDDING_MODEL_FALLBACK,
-                        )
+                        global _embedding_fallback_warned
+                        if not _embedding_fallback_warned:
+                            logger.warning(
+                                "Batch embedding model %s not found. Using fallback %s.",
+                                config.EMBEDDING_MODEL,
+                                EMBEDDING_MODEL_FALLBACK,
+                            )
+                            _embedding_fallback_warned = True
                         result = self._embed_content_batch(
                             texts_to_embed,
                             model=EMBEDDING_MODEL_FALLBACK,
@@ -486,31 +496,11 @@ class VectorStore:
                 search_success = True
                 logger.debug(f"Qdrant search via search: {len(results)} results")
             except Exception as e:
-                logger.debug(f"search failed: {e}")
-        
-        # Method 3: Try REST API directly
-        if not search_success:
-            try:
-                from qdrant_client.http import models as rest_models
-                search_request = rest_models.SearchRequest(
-                    vector=query_embedding,
-                    filter=query_filter,
-                    limit=top_k,
-                    score_threshold=config.SIMILARITY_THRESHOLD,
-                    with_payload=True,
-                )
-                response = self.client.http.points_api.search_points(
-                    collection_name=self.collection_name,
-                    search_request=search_request,
-                )
-                results = response.result if hasattr(response, 'result') else []
-                search_success = True
-                logger.debug(f"Qdrant search via REST API: {len(results)} results")
-            except Exception as e:
-                logger.error(f"Qdrant REST API search failed: {e}", exc_info=True)
+                logger.warning(f"Qdrant search() also failed: {e}")
         
         if not search_success:
-            logger.error(f"All Qdrant search methods failed. Client type: {type(self.client)}, methods: {[m for m in dir(self.client) if not m.startswith('_')][:20]}")
+            available = [m for m in dir(self.client) if not m.startswith('_') and 'search' in m.lower() or 'query' in m.lower()]
+            logger.error("All Qdrant search methods failed. Available search/query methods: %s", available)
         
         # Format results (handle both direct API and HTTP API response formats)
         formatted_results = []
@@ -634,26 +624,7 @@ class VectorStore:
                     )
                     search_success = True
                 except Exception as e:
-                    logger.debug(f"search_all_relevant search failed: {e}")
-            
-            # Method 3: Try REST API directly
-            if not search_success:
-                try:
-                    from qdrant_client.http import models as rest_models
-                    search_request = rest_models.SearchRequest(
-                        vector=query_embedding,
-                        limit=top_k,
-                        score_threshold=min_threshold,
-                        with_payload=True,
-                    )
-                    response = self.client.http.points_api.search_points(
-                        collection_name=self.collection_name,
-                        search_request=search_request,
-                    )
-                    results = response.result if hasattr(response, 'result') else []
-                    search_success = True
-                except Exception as e:
-                    logger.error(f"search_all_relevant REST API failed: {e}")
+                    logger.warning(f"search_all_relevant search() also failed: {e}")
             
             formatted_results = []
             for result in results:

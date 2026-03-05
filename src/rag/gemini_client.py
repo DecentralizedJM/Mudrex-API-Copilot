@@ -12,7 +12,7 @@ import re
 
 from google import genai
 from google.genai import types
-from google.genai.errors import ClientError
+from google.genai.errors import ClientError, ServerError
 
 from ..config import config
 from .tools.troubleshooting import TROUBLESHOOTING_TOOLS
@@ -278,15 +278,20 @@ If an endpoint isn't in this list or the provided docs, it doesn't exist. Say so
             
             return answer
             
-        except ClientError as e:
+        except (ClientError, ServerError) as e:
             logger.error(f"Gemini API error generating response: {e}", exc_info=True)
-            _report_gemini_error(e, {"method": "generate_response", "model": self.model_name, "error_type": "ClientError"})
-            if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
+            _report_gemini_error(e, {"method": "generate_response", "model": self.model_name})
+            err_str = str(e)
+            if '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str:
                 return "I'm temporarily rate-limited by my AI provider. Please try again in about 30 seconds."
+            if '503' in err_str or 'UNAVAILABLE' in err_str:
+                return "The AI is under heavy load right now. Please try again in a minute — if you're asking about an error code (e.g. 500, 202), I'll give you the exact steps then."
             return "Something went wrong on my end — not your code. Try again in a sec?"
         except Exception as e:
             logger.error(f"Error generating response: {e}", exc_info=True)
             _report_gemini_error(e, {"method": "generate_response"})
+            if '503' in str(e) or 'UNAVAILABLE' in str(e).upper():
+                return "The AI is under heavy load right now. Please try again in a minute."
             return "Something went wrong on my end — not your code. Try again in a sec?"
 
     def generate_with_tools(
@@ -480,9 +485,11 @@ limiter.wait_if_needed()
 
             answer = self._clean_response(answer)
             return answer
-        except ClientError as e:
+        except (ClientError, ServerError) as e:
             logger.error(f"Gemini API error generating generic trading answer: {e}", exc_info=True)
-            _report_gemini_error(e, {"method": "generate_generic_trading_answer", "error_type": "ClientError"})
+            _report_gemini_error(e, {"method": "generate_generic_trading_answer"})
+            if '503' in str(e) or 'UNAVAILABLE' in str(e):
+                return "The AI is under heavy load right now. Please try again in a minute."
             return "Something went wrong on my side while thinking that through. Try again in a moment?"
         except Exception as e:
             logger.error(f"Error generating generic trading answer: {e}", exc_info=True)
@@ -1023,9 +1030,11 @@ Return ONLY the transformed query, nothing else."""
                 answer = answer[:config.MAX_RESPONSE_LENGTH - 100] + "\n\n_(Cut short — ask something more specific?)_"
             
             return answer
-        except ClientError as e:
+        except (ClientError, ServerError) as e:
             logger.error(f"Gemini API error in context search response: {e}", exc_info=True)
-            _report_gemini_error(e, {"method": "generate_response_with_context_search", "error_type": "ClientError"})
+            _report_gemini_error(e, {"method": "generate_response_with_context_search"})
+            if '503' in str(e) or 'UNAVAILABLE' in str(e):
+                return "The AI is under heavy load right now. Please try again in a minute."
             return "Something went wrong on my end — not your code. Try again in a sec?"
         except Exception as e:
             logger.error(f"Error in context search response: {e}", exc_info=True)
